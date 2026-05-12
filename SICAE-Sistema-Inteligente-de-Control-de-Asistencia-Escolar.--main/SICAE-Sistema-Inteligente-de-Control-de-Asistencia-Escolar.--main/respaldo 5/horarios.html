@@ -13,10 +13,9 @@
       <img src="img/logo.png" alt="Control Escolar">
       <div>
         <h2>Horarios por mapeo</h2>
-        <p class="brand-sub">Docente, grupo, salón y lector por bloque</p>
+        <p class="brand-sub">Semestre → Grupo → Matriz semanal</p>
       </div>
     </div>
-
     <div class="header-actions">
       <span class="session-pill" data-auth-user>Sin sesión</span>
       <button class="btn-sec" onclick="location.href='index.html'">Volver</button>
@@ -25,36 +24,16 @@
   </header>
 
   <section class="registro-shell horarios-shell">
-    <h3>Mapa semanal de clases</h3>
-    <p id="estadoHorarios" class="screen-status info">Configura el mapa por grupo y consulta por docente.</p>
+    <p id="estadoHorarios" class="screen-status info">Carga grupos, docentes y salones. Luego selecciona un grupo para editar su horario.</p>
 
-    <div class="horarios-toolbar">
-      <label>
-        Vista
-        <select id="selectModoVista">
-          <option value="grupo">Por grupo (edición)</option>
-          <option value="docente">Por docente (consulta)</option>
-        </select>
-      </label>
-
-      <label id="wrapGrupoHorario">
-        Grupo
-        <select id="selectGrupoHorario"></select>
-      </label>
-
-      <label id="wrapDocenteHorario" style="display:none;">
-        Docente
-        <select id="selectDocenteHorario"></select>
-      </label>
-    </div>
-
+    <!-- ── CATÁLOGOS ─────────────────────────────────── -->
     <div class="horarios-catalogos">
       <article class="catalog-card">
         <h4>Grupos</h4>
         <div class="catalog-form">
-          <input id="inGrado" placeholder="Grado (ej: 6)">
-          <input id="inGrupo" placeholder="Grupo (ej: D)">
-          <button id="btnAddGrupo" class="btn-sec" type="button" data-role-allow="direccion">Agregar grupo</button>
+          <input id="inGrado" placeholder="Semestre (1–6)">
+          <input id="inGrupo" placeholder="Grupo (A–M)">
+          <button id="btnAddGrupo" class="btn-sec" type="button" data-role-allow="direccion">Agregar</button>
         </div>
         <div id="listaGrupos" class="chip-list"></div>
       </article>
@@ -62,10 +41,18 @@
       <article class="catalog-card">
         <h4>Docentes</h4>
         <div class="catalog-form">
-          <input id="inDocenteNombre" placeholder="Nombre docente">
-          <input id="inDocenteUsuario" placeholder="Usuario docente">
-          <button id="btnAddDocente" class="btn-sec" type="button" data-role-allow="direccion">Agregar docente</button>
+          <input id="inDocenteNombre" placeholder="Nombre completo">
+          <input id="inDocenteUsuario" placeholder="Usuario (@)">
         </div>
+        <div class="catalog-materias-wrap">
+          <p class="catalog-materias-label">Materias que imparte</p>
+          <div class="catalog-materias-form">
+            <input id="inDocenteMateria" placeholder="Ej: Biología">
+            <button id="btnAddMateriaDocente" class="btn-sec" type="button">＋</button>
+          </div>
+          <div id="listaMateriasTemporal" class="chip-list chip-list-sm"></div>
+        </div>
+        <button id="btnAddDocente" class="btn-sec btn-full" type="button" data-role-allow="direccion">Agregar docente</button>
         <div id="listaDocentes" class="chip-list"></div>
       </article>
 
@@ -74,172 +61,78 @@
         <div class="catalog-form">
           <input id="inSalonNombre" placeholder="Salón (ej: LAB-1)">
           <input id="inSalonLector" placeholder="Lector (device_id)">
-          <button id="btnAddSalon" class="btn-sec" type="button" data-role-allow="direccion">Agregar salón</button>
+          <button id="btnAddSalon" class="btn-sec" type="button" data-role-allow="direccion">Agregar</button>
         </div>
         <div id="listaSalones" class="chip-list"></div>
       </article>
     </div>
 
+    <!-- ── PERÍODOS ───────────────────────────────────── -->
     <h4 class="section-title">Configuración de períodos</h4>
     <div class="horarios-periodos table-shell">
       <table>
         <thead>
-          <tr>
-            <th>Periodo</th>
-            <th>Inicio</th>
-            <th>Fin</th>
-          </tr>
+          <tr><th>Periodo</th><th>Inicio</th><th>Fin</th></tr>
         </thead>
         <tbody id="tablaPeriodosConfig"></tbody>
       </table>
       <div class="panel-acciones panel-inline">
         <button id="btnGuardarPeriodos" class="btn-sec" type="button" data-role-allow="direccion">Guardar períodos</button>
-        <button id="btnResetPeriodos" class="btn-sec" type="button" data-role-allow="direccion">Restaurar sugerencia 50 min</button>
+        <button id="btnResetPeriodos"   class="btn-sec" type="button" data-role-allow="direccion">Restaurar 50 min</button>
       </div>
     </div>
 
-    <h4 class="section-title">Matriz semanal</h4>
-    <p class="ayuda">Haz clic en una celda para editar el bloque (solo Dirección).</p>
+    <!-- ── NAVEGACIÓN SEMESTRES → GRUPOS ─────────────── -->
+    <h4 class="section-title">Selecciona grupo para ver su horario</h4>
+    <div id="navSemestres" class="nav-semestres"></div>
 
-    <div class="horario-visual-wrap">
-      <h2 id="tituloGrupoHorario" class="horario-titulo-grupo"></h2>
-      <div class="horario-scroll">
-        <table class="horarios-mapa horario-visual">
-          <thead>
-            <tr>
-              <th class="th-periodo">Periodo</th>
-              <th>Lunes</th>
-              <th>Martes</th>
-              <th>Miércoles</th>
-              <th>Jueves</th>
-              <th>Viernes</th>
-            </tr>
-          </thead>
-          <tbody id="tablaMapaHorarios"></tbody>
-        </table>
+    <!-- ── MATRIZ DEL GRUPO SELECCIONADO ─────────────── -->
+    <div id="contenedorMatriz" style="display:none;">
+      <div class="horario-visual-wrap">
+        <h2 id="tituloGrupoHorario" class="horario-titulo-grupo"></h2>
+        <div class="horario-scroll">
+          <table class="horarios-mapa horario-visual">
+            <thead>
+              <tr>
+                <th class="th-periodo">Periodo</th>
+                <th>Lunes</th>
+                <th>Martes</th>
+                <th>Miércoles</th>
+                <th>Jueves</th>
+                <th>Viernes</th>
+              </tr>
+            </thead>
+            <tbody id="tablaMapaHorarios"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <style>
-      .horario-visual-wrap { margin: 16px 0; }
-      .horario-titulo-grupo {
-        text-align: center;
-        font-size: 1.6rem;
-        font-weight: 700;
-        margin: 0 0 10px;
-        color: #1a237e;
-        letter-spacing: .5px;
-      }
-      .horario-scroll { overflow-x: auto; }
-      .horario-visual { width: 100%; border-collapse: collapse; min-width: 560px; }
-      .horario-visual thead th {
-        background: #1a237e;
-        color: #fff;
-        padding: 10px 8px;
-        font-size: .85rem;
-        text-align: center;
-        border: 1px solid #0d1b6e;
-      }
-      .horario-visual .th-periodo { width: 80px; min-width: 80px; }
-      .horario-visual .periodo-label {
-        background: #e8eaf6;
-        text-align: center;
-        padding: 6px 4px;
-        font-size: .78rem;
-        color: #283593;
-        border: 1px solid #c5cae9;
-        white-space: nowrap;
-      }
-      .horario-visual .periodo-label strong { display: block; font-size: 1rem; }
-      .horario-visual .horario-td {
-        padding: 3px;
-        border: 1px solid #e0e0e0;
-        vertical-align: top;
-        min-width: 100px;
-      }
-      .horario-celda {
-        border-radius: 6px;
-        padding: 7px 8px;
-        min-height: 62px;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        cursor: default;
-        transition: filter .15s;
-      }
-      .horario-celda-llena { cursor: pointer; }
-      .horario-celda-llena:hover { filter: brightness(.93); }
-      .horario-celda-vacia {
-        background: #fafafa;
-        border: 1.5px dashed #e0e0e0;
-        color: #bbb;
-        font-size: 1.2rem;
-        align-items: center;
-        cursor: pointer;
-        min-height: 62px;
-      }
-      .horario-celda-vacia:hover { background: #f0f4ff; border-color: #9fa8da; color: #9fa8da; }
-      .hc-materia {
-        font-size: .82rem;
-        font-weight: 700;
-        line-height: 1.25;
-        color: #1a237e;
-        word-break: break-word;
-      }
-      .hc-docente {
-        font-size: .72rem;
-        color: #37474f;
-        margin-top: 4px;
-        font-style: italic;
-        line-height: 1.2;
-      }
-      .hc-salon {
-        font-size: .68rem;
-        color: #546e7a;
-        margin-top: 2px;
-      }
-      .horario-receso-row td {
-        background: #fff8e1;
-        text-align: center;
-        padding: 6px;
-        font-size: .82rem;
-        color: #f57f17;
-        border: 1px solid #ffe082;
-        letter-spacing: .5px;
-      }
-      .horario-receso-row strong { font-size: .9rem; margin-right: 6px; }
-    </style>
-
-    <div class="panel-acciones">
-      <button id="btnGuardarTodo" class="btn-registrar" type="button" data-role-allow="direccion">Guardar mapeo</button>
-      <button id="btnExportarHorarios" class="btn-sec" type="button">Exportar JSON</button>
-      <button id="btnImportarHorarios" class="btn-sec" type="button" data-role-allow="direccion">Importar JSON</button>
-      <input id="inputImportHorarios" type="file" accept=".json,application/json" style="display:none">
+    <!-- ── ACCIONES ───────────────────────────────────── -->
+    <div class="panel-acciones" style="margin-top:16px;">
+      <button id="btnGuardarTodo"       class="btn-registrar" type="button" data-role-allow="direccion">Guardar mapeo</button>
+      <button id="btnExportarHorarios"  class="btn-sec"       type="button">Exportar JSON</button>
+      <button id="btnImportarHorarios"  class="btn-sec"       type="button" data-role-allow="direccion">Importar JSON</button>
+      <input  id="inputImportHorarios"  type="file" accept=".json,application/json" style="display:none">
     </div>
-
-    <p class="ayuda">
-      Recomendado: cargar primero grupos, docentes y salones. En vista por grupo, toca una celda para mapear materia, docente y lector.
-      En vista por docente, solo se consulta para validar el horario.
-    </p>
   </section>
 
+  <!-- ── EDITOR DE BLOQUE (overlay) ────────────────── -->
   <div class="overlay" id="overlayHorario">
     <div class="popup popup-horario">
       <h2 id="tituloEditorHorario">Editar bloque</h2>
       <p id="subtituloEditorHorario" class="horario-resumen"></p>
-
       <input id="edClaseId" type="hidden">
 
       <div class="registro-grid">
-        <label>
-          Materia
-          <input id="edMateriaHorario" placeholder="Materia">
-        </label>
-
-        <label>
-          Docente
-          <select id="edDocenteHorario"></select>
+        <label style="grid-column:1/-1;">
+          Clase (Materia — Docente)
+          <select id="edClaseSelect" style="width:100%;margin-top:4px;padding:8px;border:1px solid #ccc;border-radius:6px;">
+            <option value="">— Sin asignar —</option>
+          </select>
+          <p id="edClaseHint" style="font-size:.75rem;color:#999;margin:3px 0 0;">
+            Registra docentes con sus materias en el catálogo para ver opciones aquí.
+          </p>
         </label>
 
         <label>
@@ -249,22 +142,109 @@
 
         <label>
           Lector (device_id)
-          <input id="edLectorHorario" placeholder="Lector del salón">
+          <input id="edLectorHorario" placeholder="Se llena automático al elegir salón">
         </label>
       </div>
 
       <div class="registro-acciones">
         <button id="btnGuardarCeldaHorario" class="btn-registrar" type="button">Guardar bloque</button>
-        <button id="btnLimpiarCeldaHorario" class="btn-sec" type="button">Limpiar bloque</button>
-        <button id="btnCerrarCeldaHorario" class="btn-sec" type="button">Cerrar</button>
+        <button id="btnLimpiarCeldaHorario" class="btn-sec"       type="button">Limpiar bloque</button>
+        <button id="btnCerrarCeldaHorario"  class="btn-sec"       type="button">Cerrar</button>
       </div>
     </div>
   </div>
 
+  <style>
+    /* ── Navegación semestres / grupos ── */
+    .nav-semestres { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
+    .semestre-section { border:1px solid #c5cae9; border-radius:8px; overflow:hidden; }
+    .semestre-header {
+      width:100%; text-align:left; padding:10px 16px;
+      background:#e8eaf6; border:none; cursor:pointer;
+      font-size:.95rem; font-weight:700; color:#283593;
+      display:flex; align-items:center; gap:8px;
+    }
+    .semestre-header:hover { background:#c5cae9; }
+    .semestre-header .sem-arrow { transition:transform .2s; display:inline-block; }
+    .semestre-header.open .sem-arrow { transform:rotate(90deg); }
+    .semestre-header .sem-count { margin-left:auto; font-size:.75rem; font-weight:400; color:#5c6bc0; }
+    .semestre-grupos {
+      display:none; flex-wrap:wrap; gap:8px;
+      padding:12px 16px; background:#fff;
+    }
+    .semestre-grupos.open { display:flex; }
+    .grupo-btn {
+      padding:7px 18px; border-radius:20px;
+      border:2px solid #9fa8da; background:#fff;
+      color:#283593; font-weight:600; font-size:.88rem;
+      cursor:pointer; transition:all .15s;
+    }
+    .grupo-btn:hover { background:#e8eaf6; }
+    .grupo-btn.active { background:#283593; color:#fff; border-color:#283593; }
+
+    /* ── Matriz visual ── */
+    .horario-visual-wrap { margin:16px 0; }
+    .horario-titulo-grupo {
+      text-align:center; font-size:1.6rem; font-weight:700;
+      margin:0 0 10px; color:#1a237e; letter-spacing:.5px;
+    }
+    .horario-scroll { overflow-x:auto; }
+    .horario-visual { width:100%; border-collapse:collapse; min-width:560px; }
+    .horario-visual thead th {
+      background:#1a237e; color:#fff; padding:10px 8px;
+      font-size:.85rem; text-align:center; border:1px solid #0d1b6e;
+    }
+    .horario-visual .th-periodo { width:80px; min-width:80px; }
+    .horario-visual .periodo-label {
+      background:#e8eaf6; text-align:center; padding:6px 4px;
+      font-size:.78rem; color:#283593; border:1px solid #c5cae9; white-space:nowrap;
+    }
+    .horario-visual .periodo-label strong { display:block; font-size:1rem; }
+    .horario-visual .horario-td {
+      padding:3px; border:1px solid #e0e0e0; vertical-align:top; min-width:100px;
+    }
+    .horario-celda {
+      border-radius:6px; padding:7px 8px; min-height:62px; height:100%;
+      display:flex; flex-direction:column; justify-content:center;
+      cursor:default; transition:filter .15s;
+    }
+    .horario-celda-llena { cursor:pointer; }
+    .horario-celda-llena:hover { filter:brightness(.93); }
+    .horario-celda-vacia {
+      background:#fafafa; border:1.5px dashed #e0e0e0; color:#bbb;
+      font-size:1.2rem; align-items:center; cursor:pointer; min-height:62px;
+    }
+    .horario-celda-vacia:hover { background:#f0f4ff; border-color:#9fa8da; color:#9fa8da; }
+    .hc-materia { font-size:.82rem; font-weight:700; line-height:1.25; color:#1a237e; word-break:break-word; }
+    .hc-docente { font-size:.72rem; color:#37474f; margin-top:4px; font-style:italic; line-height:1.2; }
+    .hc-salon   { font-size:.68rem; color:#546e7a; margin-top:2px; }
+    .horario-receso-row td {
+      background:#fff8e1; text-align:center; padding:6px;
+      font-size:.82rem; color:#f57f17; border:1px solid #ffe082; letter-spacing:.5px;
+    }
+    .horario-receso-row strong { font-size:.9rem; margin-right:6px; }
+
+    /* ── Catálogo docentes extendido ── */
+    .catalog-materias-wrap { margin:8px 0; padding:8px 10px; background:#f9f9f9; border-radius:6px; border:1px solid #eee; }
+    .catalog-materias-label { font-size:.78rem; font-weight:600; color:#555; margin:0 0 5px; }
+    .catalog-materias-form { display:flex; gap:6px; }
+    .catalog-materias-form input { flex:1; }
+    .btn-full { width:100%; margin-top:8px; }
+    .chip-list-sm .chip { font-size:.78rem; padding:2px 8px; }
+    .chip-list-sm .chip strong { color:#1a237e; margin-right:4px; }
+    .docente-chip { flex-direction:column; align-items:flex-start; gap:3px; padding:7px 10px; }
+    .docente-nombre { font-weight:600; font-size:.85rem; }
+    .docente-materias { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+    .mat-badge {
+      background:#e3f2fd; color:#1565c0; border-radius:10px;
+      padding:1px 8px; font-size:.72rem; font-weight:600; white-space:nowrap;
+    }
+  </style>
+
   <script src="js/storage.js?v=20260310a"></script>
-  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/auth.js?v=20260312b"></script>
   <script src="js/realtime.js?v=20260312a"></script>
-  <script src="js/horarios.js?v=20260312a"></script>
-  <script src="js/horarios_page.js?v=20260312a"></script>
+  <script src="js/horarios.js?v=20260312b"></script>
+  <script src="js/horarios_page.js?v=20260312b"></script>
 </body>
 </html>
