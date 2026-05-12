@@ -12,36 +12,29 @@ const DIAS = [
   { code: "VI", nombre: "Viernes" }
 ];
 
-const estadoEl = document.getElementById("estadoHorarios");
-const selectModoVista = document.getElementById("selectModoVista");
-const wrapGrupoHorario = document.getElementById("wrapGrupoHorario");
-const wrapDocenteHorario = document.getElementById("wrapDocenteHorario");
-const selectGrupoHorario = document.getElementById("selectGrupoHorario");
-const selectDocenteHorario = document.getElementById("selectDocenteHorario");
+const estadoEl            = document.getElementById("estadoHorarios");
 const tablaPeriodosConfig = document.getElementById("tablaPeriodosConfig");
-const tablaMapaHorarios = document.getElementById("tablaMapaHorarios");
+const tablaMapaHorarios   = document.getElementById("tablaMapaHorarios");
 const inputImportHorarios = document.getElementById("inputImportHorarios");
-
-const listaGrupos = document.getElementById("listaGrupos");
-const listaDocentes = document.getElementById("listaDocentes");
-const listaSalones = document.getElementById("listaSalones");
-
-const overlayHorario = document.getElementById("overlayHorario");
-const tituloEditorHorario = document.getElementById("tituloEditorHorario");
+const listaGrupos         = document.getElementById("listaGrupos");
+const listaDocentes       = document.getElementById("listaDocentes");
+const listaSalones        = document.getElementById("listaSalones");
+const overlayHorario      = document.getElementById("overlayHorario");
+const tituloEditorHorario    = document.getElementById("tituloEditorHorario");
 const subtituloEditorHorario = document.getElementById("subtituloEditorHorario");
-const edClaseId = document.getElementById("edClaseId");
-const edMateriaHorario = document.getElementById("edMateriaHorario");
-const edDocenteHorario = document.getElementById("edDocenteHorario");
-const edSalonHorario = document.getElementById("edSalonHorario");
+const edClaseId    = document.getElementById("edClaseId");
+const edSalonHorario  = document.getElementById("edSalonHorario");
 const edLectorHorario = document.getElementById("edLectorHorario");
 
 let mapa = null;
-let modoVista = "grupo";
 let grupoActivo = "";
-let docenteActivo = "";
 let celdaActiva = null;
 let puedeEditar = false;
 let desuscribirHorarios = null;
+let materiasTemporales = [];
+let semestresAbiertos = new Set();
+
+const LETRAS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 window.addEventListener("load", initHorarios);
 window.addEventListener("beforeunload", () => {
@@ -164,12 +157,6 @@ async function initHorarios() {
     mapa = horarioGuardarMapa(mapa, { emit: false });
   }
 
-  const role = typeof getAuthRole === "function" ? getAuthRole() : "";
-  if (role === "docente") {
-    modoVista = "docente";
-    selectModoVista.value = "docente";
-  }
-
   bindEventos();
   renderTodo();
 
@@ -191,33 +178,16 @@ async function initHorarios() {
 }
 
 function bindEventos() {
-  selectModoVista.addEventListener("change", () => {
-    modoVista = String(selectModoVista.value || "grupo");
-    renderSelectoresEntidad();
-    renderMapa();
-  });
-
-  selectGrupoHorario.addEventListener("change", () => {
-    grupoActivo = String(selectGrupoHorario.value || "");
-    renderMapa();
-  });
-
-  selectDocenteHorario.addEventListener("change", () => {
-    docenteActivo = String(selectDocenteHorario.value || "");
-    renderMapa();
-  });
-
   document.getElementById("btnAddGrupo")?.addEventListener("click", agregarGrupo);
   document.getElementById("btnAddDocente")?.addEventListener("click", agregarDocente);
   document.getElementById("btnAddSalon")?.addEventListener("click", agregarSalon);
-
+  document.getElementById("btnAddMateriaDocente")?.addEventListener("click", agregarMateriaATemporal);
+  document.getElementById("inDocenteMateria")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); agregarMateriaATemporal(); }
+  });
   document.getElementById("btnGuardarPeriodos")?.addEventListener("click", guardarPeriodos);
   document.getElementById("btnResetPeriodos")?.addEventListener("click", resetearPeriodos);
-
-  document.getElementById("btnGuardarTodo")?.addEventListener("click", () => {
-    persistirMapa("Mapa guardado correctamente", "ok");
-  });
-
+  document.getElementById("btnGuardarTodo")?.addEventListener("click", () => persistirMapa("Mapa guardado correctamente", "ok"));
   document.getElementById("btnExportarHorarios")?.addEventListener("click", exportarJSON);
   document.getElementById("btnImportarHorarios")?.addEventListener("click", () => {
     if (!inputImportHorarios) return;
@@ -225,68 +195,85 @@ function bindEventos() {
     inputImportHorarios.click();
   });
   inputImportHorarios?.addEventListener("change", importarJSON);
-
   document.getElementById("btnCerrarCeldaHorario")?.addEventListener("click", cerrarEditor);
   document.getElementById("btnGuardarCeldaHorario")?.addEventListener("click", guardarBloqueDesdeEditor);
   document.getElementById("btnLimpiarCeldaHorario")?.addEventListener("click", limpiarBloqueDesdeEditor);
-
   edSalonHorario?.addEventListener("change", () => {
-    const salonId = String(edSalonHorario.value || "");
-    const salon = (mapa.salones || []).find(s => String(s.id || "") === salonId);
+    const salon = (mapa.salones || []).find(s => String(s.id || "") === String(edSalonHorario.value || ""));
     if (salon?.lector_id && !String(edLectorHorario?.value || "").trim()) {
       edLectorHorario.value = String(salon.lector_id || "");
     }
   });
-
   overlayHorario?.addEventListener("click", e => {
     if (e.target === overlayHorario) cerrarEditor();
   });
 }
 
 function renderTodo() {
-  renderSelectoresEntidad();
+  renderNavegacionSemestres();
   renderCatalogos();
   renderPeriodos();
-  renderMapa();
+  if (grupoActivo) renderMapa();
 }
 
-function renderSelectoresEntidad() {
-  const grupos = mapa.grupos || [];
-  const docentes = mapa.docentes || [];
+function renderNavegacionSemestres() {
+  const nav = document.getElementById("navSemestres");
+  if (!nav) return;
+  nav.innerHTML = "";
 
-  selectGrupoHorario.innerHTML = "";
-  grupos.forEach(g => {
-    const op = document.createElement("option");
-    op.value = String(g.key || "");
-    op.textContent = String(g.label || g.key || "");
-    selectGrupoHorario.appendChild(op);
+  const porSemestre = {};
+  (mapa.grupos || []).forEach(g => {
+    const sem = String(g.grado || "?");
+    if (!porSemestre[sem]) porSemestre[sem] = [];
+    porSemestre[sem].push(g);
   });
 
-  if (!grupoActivo || !grupos.some(g => String(g.key || "") === grupoActivo)) {
-    grupoActivo = String(grupos[0]?.key || "");
+  const semestres = Object.keys(porSemestre).sort((a, b) => Number(a) - Number(b));
+  if (!semestres.length) {
+    nav.innerHTML = `<p class="ayuda">Agrega grupos en el catálogo para verlos aquí.</p>`;
+    return;
   }
-  selectGrupoHorario.value = grupoActivo;
 
-  selectDocenteHorario.innerHTML = "";
-  docentes.forEach(d => {
-    const op = document.createElement("option");
-    op.value = String(d.id || "");
-    op.textContent = labelDocente(d);
-    selectDocenteHorario.appendChild(op);
+  semestres.forEach(sem => {
+    const grupos = (porSemestre[sem] || []).sort((a, b) => compararTexto(a.grupo, b.grupo));
+    const isOpen = semestresAbiertos.has(sem);
+
+    const section = document.createElement("div");
+    section.className = "semestre-section";
+
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "semestre-header" + (isOpen ? " open" : "");
+    header.innerHTML = `<span class="sem-arrow">▶</span> Semestre ${sem}
+      <span class="sem-count">${grupos.length} grupo${grupos.length !== 1 ? "s" : ""}</span>`;
+    header.addEventListener("click", () => {
+      if (semestresAbiertos.has(sem)) semestresAbiertos.delete(sem);
+      else semestresAbiertos.add(sem);
+      renderNavegacionSemestres();
+    });
+
+    const gruposDiv = document.createElement("div");
+    gruposDiv.className = "semestre-grupos" + (isOpen ? " open" : "");
+
+    grupos.forEach(g => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "grupo-btn" + (grupoActivo === g.key ? " active" : "");
+      btn.textContent = g.label;
+      btn.addEventListener("click", () => {
+        grupoActivo = g.key;
+        const cont = document.getElementById("contenedorMatriz");
+        if (cont) { cont.style.display = "block"; cont.scrollIntoView({ behavior: "smooth", block: "start" }); }
+        renderMapa();
+        renderNavegacionSemestres();
+      });
+      gruposDiv.appendChild(btn);
+    });
+
+    section.appendChild(header);
+    section.appendChild(gruposDiv);
+    nav.appendChild(section);
   });
-
-  const user = typeof getAuthUser === "function" ? getAuthUser() : null;
-  const docentePreferido = String(user?.id || "");
-  if (!docenteActivo || !docentes.some(d => String(d.id || "") === docenteActivo)) {
-    docenteActivo = docentes.some(d => String(d.id || "") === docentePreferido)
-      ? docentePreferido
-      : String(docentes[0]?.id || "");
-  }
-  selectDocenteHorario.value = docenteActivo;
-
-  const esVistaGrupo = modoVista === "grupo";
-  wrapGrupoHorario.style.display = esVistaGrupo ? "block" : "none";
-  wrapDocenteHorario.style.display = esVistaGrupo ? "none" : "block";
 }
 
 function renderCatalogos() {
@@ -306,20 +293,7 @@ function renderCatalogos() {
     }))
   );
 
-  renderChips(
-    listaDocentes,
-    (mapa.docentes || []).map(d => ({
-      id: String(d.id || ""),
-      label: labelDocente(d),
-      onRemove: () => {
-        if (!puedeEditar) return;
-        mapa.docentes = (mapa.docentes || []).filter(x => String(x.id || "") !== String(d.id || ""));
-        if (docenteActivo === String(d.id || "")) docenteActivo = "";
-        persistirMapa("Docente removido del catálogo", "warn");
-        renderTodo();
-      }
-    }))
-  );
+  renderListaDocentes();
 
   renderChips(
     listaSalones,
@@ -429,6 +403,124 @@ function colorParaMateria(materia) {
   return PALETA_COLORES[Math.abs(h) % PALETA_COLORES.length];
 }
 
+function agregarMateriaATemporal() {
+  const inp = document.getElementById("inDocenteMateria");
+  const val = String(inp?.value || "").trim();
+  if (!val || materiasTemporales.includes(val)) {
+    if (inp) inp.value = "";
+    return;
+  }
+  materiasTemporales.push(val);
+  if (inp) inp.value = "";
+  renderChipsMateriasTemporal();
+}
+
+function renderChipsMateriasTemporal() {
+  const cont = document.getElementById("listaMateriasTemporal");
+  if (!cont) return;
+  cont.innerHTML = "";
+  materiasTemporales.forEach((m, i) => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.innerHTML = `<span><strong>${LETRAS[i] || (i + 1)}</strong> — ${m}</span>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "×";
+    btn.addEventListener("click", () => {
+      materiasTemporales.splice(i, 1);
+      renderChipsMateriasTemporal();
+    });
+    chip.appendChild(btn);
+    cont.appendChild(chip);
+  });
+}
+
+function renderListaDocentes() {
+  if (!listaDocentes) return;
+  listaDocentes.innerHTML = "";
+  const docentes = mapa.docentes || [];
+
+  if (!docentes.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Sin docentes";
+    listaDocentes.appendChild(p);
+    return;
+  }
+
+  docentes.forEach(d => {
+    const chip = document.createElement("div");
+    chip.className = "chip docente-chip";
+
+    const materias = Array.isArray(d.materias) ? d.materias.filter(Boolean) : [];
+    const badgesHTML = materias.map((m, i) =>
+      `<span class="mat-badge"><strong>${LETRAS[i] || (i + 1)}</strong> ${m}</span>`
+    ).join("");
+
+    const info = document.createElement("div");
+    info.innerHTML = `
+      <span class="docente-nombre">${labelDocente(d)}</span>
+      ${materias.length ? `<div class="docente-materias">${badgesHTML}</div>` : ""}`;
+    chip.appendChild(info);
+
+    if (puedeEditar) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "×";
+      btn.addEventListener("click", () => {
+        mapa.docentes = (mapa.docentes || []).filter(x => String(x.id || "") !== String(d.id || ""));
+        if (docenteActivo === String(d.id || "")) docenteActivo = "";
+        persistirMapa("Docente removido del catálogo", "warn");
+        renderTodo();
+      });
+      chip.appendChild(btn);
+    }
+    listaDocentes.appendChild(chip);
+  });
+}
+
+function renderSelectMateriasEditor(docenteId, materiaActual = "") {
+  const select = document.getElementById("edMateriaSelect");
+  const input = document.getElementById("edMateriaHorario");
+  if (!select || !input) return;
+
+  const docente = (mapa.docentes || []).find(d => String(d.id || "") === String(docenteId || ""));
+  const materias = Array.isArray(docente?.materias) ? docente.materias.filter(Boolean) : [];
+
+  if (!materias.length) {
+    select.style.display = "none";
+    input.style.display = "block";
+    input.value = materiaActual;
+    return;
+  }
+
+  select.innerHTML = `<option value="">— Selecciona materia —</option>`;
+  let encontrada = false;
+  materias.forEach((m, i) => {
+    const op = document.createElement("option");
+    op.value = m;
+    op.textContent = `${LETRAS[i] || (i + 1)} — ${m}`;
+    if (m === materiaActual) { op.selected = true; encontrada = true; }
+    select.appendChild(op);
+  });
+
+  const otraOp = document.createElement("option");
+  otraOp.value = "__otra__";
+  otraOp.textContent = "— Otra materia —";
+  select.appendChild(otraOp);
+
+  select.style.display = "block";
+
+  if (!encontrada && materiaActual) {
+    otraOp.selected = true;
+    input.style.display = "block";
+    input.value = materiaActual;
+  } else {
+    input.style.display = encontrada ? "none" : "block";
+    if (!encontrada) input.value = materiaActual;
+  }
+}
+
 function obtenerClaseVista(dia, periodoNum) {
   const slot = Number(periodoNum || 0);
   if (!slot) return null;
@@ -471,9 +563,7 @@ function renderMapa() {
     .slice()
     .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
 
-  const sinEntidad = (modoVista === "grupo" && !grupoActivo) ||
-                     (modoVista === "docente" && !docenteActivo);
-  const editable   = puedeEditar && modoVista === "grupo" && !!grupoActivo && !sinEntidad;
+  const editable = puedeEditar && !!grupoActivo;
 
   periodos.forEach((periodo, idx) => {
     // Insertar fila de RECESO si hay una brecha >= 15 min entre periodos
@@ -517,12 +607,9 @@ function renderMapa() {
       } else {
         const color    = colorParaMateria(clase.materia);
         const materia  = String(clase.materia || "Clase");
-        const docLabel = modoVista === "grupo"
-          ? String(clase.docente_nombre || clase.docente_username || "").trim()
-          : String(clase.grupo_label || clase.grupo_key || "").trim();
+        const docLabel = String(clase.docente_nombre || clase.docente_username || "").trim();
         const salon    = String(clase.salon_nombre || clase.lector_id || "").trim();
-        const extra    = modoVista === "docente" && Number(clase._total || 0) > 1
-          ? ` <em style="font-size:.68rem;">(+${Number(clase._total || 0) - 1} más)</em>` : "";
+        const extra    = "";
 
         const div = document.createElement("div");
         div.className = "horario-celda horario-celda-llena";
@@ -544,8 +631,26 @@ function renderMapa() {
   });
 }
 
+function buildClaseOptions() {
+  const opts = [];
+  (mapa.docentes || []).forEach(d => {
+    const materias = Array.isArray(d.materias) ? d.materias.filter(Boolean) : [];
+    materias.forEach((m, i) => {
+      opts.push({
+        value: `${m}||${d.id}`,
+        label: `${LETRAS[i] || (i + 1)} — ${m}  ·  ${labelDocente(d)}`,
+        materia: m,
+        docente_id: d.id,
+        docente_nombre: d.nombre,
+        docente_username: d.username
+      });
+    });
+  });
+  return opts;
+}
+
 function abrirEditor(dia, periodo, clase) {
-  if (!puedeEditar || modoVista !== "grupo" || !grupoActivo) return;
+  if (!puedeEditar || !grupoActivo) return;
 
   celdaActiva = { dia, periodo };
   const grupoObj = (mapa.grupos || []).find(g => String(g.key || "") === String(grupoActivo || ""));
@@ -554,23 +659,38 @@ function abrirEditor(dia, periodo, clase) {
 
   tituloEditorHorario.textContent = "Editar bloque";
   subtituloEditorHorario.textContent = `${grupoTexto} | ${diaTexto} | Periodo ${periodo}`;
-
   edClaseId.value = String(clase?.id || "");
-  edMateriaHorario.value = String(clase?.materia || "");
 
-  renderSelectDocentesEditor(String(clase?.docente_id || ""));
+  // Poblar select combinado materia-docente
+  const claseSelect = document.getElementById("edClaseSelect");
+  const hint = document.getElementById("edClaseHint");
+  const opts = buildClaseOptions();
+  const claseValActual = clase ? `${clase.materia}||${clase.docente_id}` : "";
+
+  claseSelect.innerHTML = `<option value="">— Sin asignar —</option>`;
+  opts.forEach(opt => {
+    const op = document.createElement("option");
+    op.value = opt.value;
+    op.textContent = opt.label;
+    if (opt.value === claseValActual) op.selected = true;
+    claseSelect.appendChild(op);
+  });
+
+  if (hint) hint.style.display = opts.length ? "none" : "block";
+
   renderSelectSalonesEditor(String(clase?.salon_id || ""));
   edLectorHorario.value = String(clase?.lector_id || "");
 
   overlayHorario.style.display = "flex";
-  edMateriaHorario.focus();
+  claseSelect.focus();
 }
 
 function cerrarEditor() {
   overlayHorario.style.display = "none";
   celdaActiva = null;
   edClaseId.value = "";
-  edMateriaHorario.value = "";
+  const sel = document.getElementById("edClaseSelect");
+  if (sel) sel.value = "";
   edLectorHorario.value = "";
 }
 
@@ -612,20 +732,23 @@ function renderSelectSalonesEditor(selectedId = "") {
 function guardarBloqueDesdeEditor() {
   if (!puedeEditar || !celdaActiva || !grupoActivo) return;
 
-  const materia = String(edMateriaHorario.value || "").trim();
-  const docenteId = String(edDocenteHorario.value || "");
-  if (!materia) {
-    setEstado("Captura la materia para guardar el bloque", "error");
-    return;
-  }
-  if (!docenteId) {
-    setEstado("Selecciona el docente del bloque", "error");
+  const claseSelect = document.getElementById("edClaseSelect");
+  const claseVal = String(claseSelect?.value || "").trim();
+
+  if (!claseVal) {
+    setEstado("Selecciona una clase (materia — docente) para guardar el bloque", "error");
     return;
   }
 
-  const grupoObj = (mapa.grupos || []).find(g => String(g.key || "") === String(grupoActivo || ""));
+  const [materia, docenteId] = claseVal.split("||");
+  if (!materia || !docenteId) {
+    setEstado("Selección de clase inválida", "error");
+    return;
+  }
+
+  const grupoObj  = (mapa.grupos || []).find(g => String(g.key || "") === String(grupoActivo || ""));
   const docenteObj = (mapa.docentes || []).find(d => String(d.id || "") === docenteId) || {};
-  const salonObj = (mapa.salones || []).find(s => String(s.id || "") === String(edSalonHorario.value || "")) || {};
+  const salonObj  = (mapa.salones || []).find(s => String(s.id || "") === String(edSalonHorario.value || "")) || {};
   const lectorManual = String(edLectorHorario.value || "").trim();
 
   mapa = horarioUpsertClase(mapa, {
@@ -715,11 +838,16 @@ function agregarDocente() {
   mapa.docentes.push({
     id,
     username,
-    nombre: nombre || username
+    nombre: nombre || username,
+    materias: [...materiasTemporales]
   });
 
+  materiasTemporales = [];
+  renderChipsMateriasTemporal();
   if (inNombre) inNombre.value = "";
   if (inUsuario) inUsuario.value = "";
+  const inMateria = document.getElementById("inDocenteMateria");
+  if (inMateria) inMateria.value = "";
 
   persistirMapa("Docente agregado", "ok");
   renderTodo();
