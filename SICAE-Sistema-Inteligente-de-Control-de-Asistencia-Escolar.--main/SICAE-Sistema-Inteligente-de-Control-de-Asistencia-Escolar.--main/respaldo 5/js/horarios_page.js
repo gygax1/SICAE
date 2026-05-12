@@ -116,13 +116,7 @@ function mergeGruposDesdeAlumnos() {
 }
 
 async function initHorarios() {
-  if (
-    !selectModoVista ||
-    !selectGrupoHorario ||
-    !selectDocenteHorario ||
-    !tablaPeriodosConfig ||
-    !tablaMapaHorarios
-  ) {
+  if (!tablaPeriodosConfig || !tablaMapaHorarios) {
     return;
   }
 
@@ -469,7 +463,7 @@ function renderListaDocentes() {
       btn.textContent = "×";
       btn.addEventListener("click", () => {
         mapa.docentes = (mapa.docentes || []).filter(x => String(x.id || "") !== String(d.id || ""));
-        if (docenteActivo === String(d.id || "")) docenteActivo = "";
+        if (grupoActivo && false) {}  // placeholder — docenteActivo ya no existe
         persistirMapa("Docente removido del catálogo", "warn");
         renderTodo();
       });
@@ -523,25 +517,13 @@ function renderSelectMateriasEditor(docenteId, materiaActual = "") {
 
 function obtenerClaseVista(dia, periodoNum) {
   const slot = Number(periodoNum || 0);
-  if (!slot) return null;
+  if (!slot || !grupoActivo) return null;
 
-  if (modoVista === "grupo") {
-    return (mapa.clases || []).find(c =>
-      String(c.grupo_key || "") === String(grupoActivo || "") &&
-      String(c.dia || "") === String(dia || "") &&
-      Number(c.periodo || 0) === slot
-    ) || null;
-  }
-
-  const clases = (mapa.clases || []).filter(c =>
-    String(c.docente_id || "") === String(docenteActivo || "") &&
+  return (mapa.clases || []).find(c =>
+    String(c.grupo_key || "") === String(grupoActivo || "") &&
     String(c.dia || "") === String(dia || "") &&
     Number(c.periodo || 0) === slot
-  );
-  if (!clases.length) return null;
-  const first = { ...clases[0] };
-  first._total = clases.length;
-  return first;
+  ) || null;
 }
 
 function renderMapa() {
@@ -550,13 +532,8 @@ function renderMapa() {
   // Actualizar título del grupo/docente encima de la tabla
   const tituloEl = document.getElementById("tituloGrupoHorario");
   if (tituloEl) {
-    if (modoVista === "grupo") {
-      const g = (mapa.grupos || []).find(x => String(x.key || "") === grupoActivo);
-      tituloEl.textContent = g?.label || grupoActivo || "";
-    } else {
-      const d = (mapa.docentes || []).find(x => String(x.id || "") === docenteActivo);
-      tituloEl.textContent = d ? labelDocente(d) : "";
-    }
+    const g = (mapa.grupos || []).find(x => String(x.key || "") === grupoActivo);
+    tituloEl.textContent = g?.label || grupoActivo || "";
   }
 
   const periodos = (mapa?.config?.periodos || [])
