@@ -100,21 +100,116 @@
 
     <h4 class="section-title">Matriz semanal</h4>
     <p class="ayuda">Haz clic en una celda para editar el bloque (solo Dirección).</p>
-    <div class="table-shell horarios-map-shell">
-      <table class="horarios-mapa">
-        <thead>
-          <tr>
-            <th>Periodo</th>
-            <th>Lu</th>
-            <th>Ma</th>
-            <th>Mi</th>
-            <th>Ju</th>
-            <th>Vi</th>
-          </tr>
-        </thead>
-        <tbody id="tablaMapaHorarios"></tbody>
-      </table>
+
+    <div class="horario-visual-wrap">
+      <h2 id="tituloGrupoHorario" class="horario-titulo-grupo"></h2>
+      <div class="horario-scroll">
+        <table class="horarios-mapa horario-visual">
+          <thead>
+            <tr>
+              <th class="th-periodo">Periodo</th>
+              <th>Lunes</th>
+              <th>Martes</th>
+              <th>Miércoles</th>
+              <th>Jueves</th>
+              <th>Viernes</th>
+            </tr>
+          </thead>
+          <tbody id="tablaMapaHorarios"></tbody>
+        </table>
+      </div>
     </div>
+
+    <style>
+      .horario-visual-wrap { margin: 16px 0; }
+      .horario-titulo-grupo {
+        text-align: center;
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin: 0 0 10px;
+        color: #1a237e;
+        letter-spacing: .5px;
+      }
+      .horario-scroll { overflow-x: auto; }
+      .horario-visual { width: 100%; border-collapse: collapse; min-width: 560px; }
+      .horario-visual thead th {
+        background: #1a237e;
+        color: #fff;
+        padding: 10px 8px;
+        font-size: .85rem;
+        text-align: center;
+        border: 1px solid #0d1b6e;
+      }
+      .horario-visual .th-periodo { width: 80px; min-width: 80px; }
+      .horario-visual .periodo-label {
+        background: #e8eaf6;
+        text-align: center;
+        padding: 6px 4px;
+        font-size: .78rem;
+        color: #283593;
+        border: 1px solid #c5cae9;
+        white-space: nowrap;
+      }
+      .horario-visual .periodo-label strong { display: block; font-size: 1rem; }
+      .horario-visual .horario-td {
+        padding: 3px;
+        border: 1px solid #e0e0e0;
+        vertical-align: top;
+        min-width: 100px;
+      }
+      .horario-celda {
+        border-radius: 6px;
+        padding: 7px 8px;
+        min-height: 62px;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        cursor: default;
+        transition: filter .15s;
+      }
+      .horario-celda-llena { cursor: pointer; }
+      .horario-celda-llena:hover { filter: brightness(.93); }
+      .horario-celda-vacia {
+        background: #fafafa;
+        border: 1.5px dashed #e0e0e0;
+        color: #bbb;
+        font-size: 1.2rem;
+        align-items: center;
+        cursor: pointer;
+        min-height: 62px;
+      }
+      .horario-celda-vacia:hover { background: #f0f4ff; border-color: #9fa8da; color: #9fa8da; }
+      .hc-materia {
+        font-size: .82rem;
+        font-weight: 700;
+        line-height: 1.25;
+        color: #1a237e;
+        word-break: break-word;
+      }
+      .hc-docente {
+        font-size: .72rem;
+        color: #37474f;
+        margin-top: 4px;
+        font-style: italic;
+        line-height: 1.2;
+      }
+      .hc-salon {
+        font-size: .68rem;
+        color: #546e7a;
+        margin-top: 2px;
+      }
+      .horario-receso-row td {
+        background: #fff8e1;
+        text-align: center;
+        padding: 6px;
+        font-size: .82rem;
+        color: #f57f17;
+        border: 1px solid #ffe082;
+        letter-spacing: .5px;
+      }
+      .horario-receso-row strong { font-size: .9rem; margin-right: 6px; }
+    </style>
 
     <div class="panel-acciones">
       <button id="btnGuardarTodo" class="btn-registrar" type="button" data-role-allow="direccion">Guardar mapeo</button>
