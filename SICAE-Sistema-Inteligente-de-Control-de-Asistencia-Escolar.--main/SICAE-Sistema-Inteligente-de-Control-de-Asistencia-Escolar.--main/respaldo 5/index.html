@@ -56,6 +56,7 @@
     <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="location.href='historial.html'">Historial</button>
     <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="descargarReporte('asistencias')">Exportar asistencias CSV</button>
     <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="descargarReporte('diario')">Exportar resumen diario</button>
+    <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="abrirPanelUsuarios()">Gestionar usuarios</button>
   </div>
 
   <p class="leyenda">Pase la tarjeta del alumno para registrar entrada o salida automáticamente.</p>
@@ -81,6 +82,79 @@
     <div class="box">
       <h1 id="tituloConfirmacion"></h1>
       <p id="mensajeConfirmacion"></p>
+    </div>
+  </div>
+
+  <!-- Panel gestión de usuarios (solo dirección) -->
+  <div id="panelUsuarios" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:900; overflow-y:auto;">
+    <div style="background:#fff; max-width:760px; margin:40px auto; border-radius:12px; padding:28px 24px; position:relative;">
+      <button onclick="cerrarPanelUsuarios()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#555;">✕</button>
+      <h2 style="margin:0 0 18px;">Gestión de usuarios</h2>
+      <div id="listaUsuariosContenido">Cargando...</div>
+    </div>
+  </div>
+
+  <!-- Modal edición de usuario -->
+  <div id="modalUsuario" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000; overflow-y:auto;">
+    <div style="background:#fff; max-width:480px; margin:40px auto; border-radius:12px; padding:28px 24px; position:relative;">
+      <button onclick="cerrarModalUsuario()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#555;">✕</button>
+      <h2 style="margin:0 0 18px;" id="modalUsuarioTitulo">Editar usuario</h2>
+      <form id="formEditarUsuario" style="display:flex;flex-direction:column;gap:10px;" onsubmit="guardarUsuario(event)">
+        <input type="hidden" id="editUserId">
+        <label style="font-size:.85rem;font-weight:600;">Nombre completo
+          <input id="editNombre" type="text" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;" required>
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">Teléfono
+          <input id="editTelefono" type="tel" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">Correo
+          <input id="editCorreo" type="email" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">CURP
+          <input id="editCurp" type="text" maxlength="18" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">Año de nacimiento
+          <input id="editAnio" type="number" min="1900" max="2100" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">Sexo
+          <select id="editSexo" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+            <option value="">—</option>
+            <option value="M">Masculino</option>
+            <option value="F">Femenino</option>
+            <option value="X">Prefiero no decir</option>
+          </select>
+        </label>
+        <label style="font-size:.85rem;font-weight:600;">Rol
+          <select id="editRol" style="display:block;width:100%;margin-top:3px;padding:7px 10px;border:1px solid #ccc;border-radius:6px;">
+            <option value="docente">Docente</option>
+            <option value="direccion">Dirección</option>
+          </select>
+        </label>
+
+        <!-- Tarjeta NFC -->
+        <div style="border:1.5px dashed #90caf9;border-radius:8px;padding:12px;background:#f0f7ff;">
+          <p style="margin:0 0 8px;font-size:.85rem;font-weight:600;color:#555;">Tarjeta NFC</p>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span id="editTarjetaLabel" style="flex:1;font-family:monospace;font-size:.9rem;color:#757575;">Sin tarjeta</span>
+            <button type="button" id="btnLeerTarjetaEdit" onclick="toggleLecturaEnModal()"
+              style="background:#1976d2;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:.85rem;cursor:pointer;">
+              Leer tarjeta
+            </button>
+            <button type="button" onclick="quitarTarjetaUsuario()"
+              style="background:#e53935;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:.85rem;cursor:pointer;">
+              Quitar
+            </button>
+          </div>
+          <p id="estadoNFCEdit" style="margin:6px 0 0;font-size:.8rem;color:#555;display:none;"></p>
+        </div>
+
+        <p id="msgEditarUsuario" style="font-size:.85rem;color:#555;margin:0;"></p>
+
+        <div style="display:flex;gap:10px;margin-top:4px;">
+          <button type="submit" style="flex:1;background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:10px;font-size:.95rem;cursor:pointer;">Guardar</button>
+          <button type="button" onclick="cerrarModalUsuario()" style="flex:1;background:#eee;color:#333;border:none;border-radius:8px;padding:10px;font-size:.95rem;cursor:pointer;">Cancelar</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -669,6 +743,181 @@
     window.addEventListener("horarios:changed", async () => {
       await refrescarFiltroHorarioDocente({ forceRender: true });
     });
+
+    /* ======================================================
+       GESTIÓN DE USUARIOS (solo dirección)
+    ====================================================== */
+
+    let _usuarioEditando = null;
+    let _tarjetaNFCModal = null;  // uid capturado en modal
+    let _nfcModalActivo  = false;
+    // flag para redirigir UIDs NFC al modal en vez de al registro de asistencia
+    let _modoCapturaTarjetaModal = false;
+
+    // Hook en procesarTarjeta: si el modal está esperando tarjeta, redirige el UID
+    const _procesarTarjetaOriginal = procesarTarjeta;
+    procesarTarjeta = async function(uid) {
+      if (_modoCapturaTarjetaModal) {
+        uid = normalizarUID(uid);
+        _modoCapturaTarjetaModal = false;
+        _nfcModalActivo = false;
+        const btnE = document.getElementById("btnLeerTarjetaEdit");
+        if (btnE) { btnE.textContent = "Leer tarjeta"; btnE.style.background = "#1976d2"; }
+        _tarjetaNFCModal = uid;
+        const lbl = document.getElementById("editTarjetaLabel");
+        if (lbl) { lbl.textContent = uid; lbl.style.color = "#2e7d32"; }
+        const st = document.getElementById("estadoNFCEdit");
+        if (st) { st.textContent = `Tarjeta lista: ${uid}`; st.style.display = "block"; }
+        return;
+      }
+      return _procesarTarjetaOriginal(uid);
+    };
+
+    async function abrirPanelUsuarios() {
+      document.getElementById("panelUsuarios").style.display = "block";
+      await cargarListaUsuarios();
+    }
+
+    function cerrarPanelUsuarios() {
+      document.getElementById("panelUsuarios").style.display = "none";
+    }
+
+    async function cargarListaUsuarios() {
+      const cont = document.getElementById("listaUsuariosContenido");
+      cont.innerHTML = "<p style='color:#555;'>Cargando usuarios...</p>";
+
+      const res = await appObtenerUsuarios();
+      if (!res.ok || !res.usuarios.length) {
+        cont.innerHTML = "<p style='color:#888;'>No hay usuarios registrados.</p>";
+        return;
+      }
+
+      const rolBadge = r => r === "direccion"
+        ? `<span style="background:#e3f2fd;color:#1565c0;padding:2px 8px;border-radius:10px;font-size:.75rem;">Dirección</span>`
+        : `<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:.75rem;">Docente</span>`;
+
+      const filas = res.usuarios.map(u => `
+        <tr>
+          <td style="padding:8px 10px;">${u.nombre_completo || u.username}</td>
+          <td style="padding:8px 10px;">${rolBadge(u.rol)}</td>
+          <td style="padding:8px 10px;font-family:monospace;font-size:.8rem;color:${u.tarjeta_uid ? "#2e7d32" : "#bbb"};">
+            ${u.tarjeta_uid || "—"}
+          </td>
+          <td style="padding:8px 10px;">
+            <button onclick='abrirModalUsuario(${JSON.stringify(u)})'
+              style="background:#1976d2;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:.8rem;cursor:pointer;">
+              Editar
+            </button>
+          </td>
+        </tr>`).join("");
+
+      cont.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:2px solid #e0e0e0;text-align:left;">
+              <th style="padding:8px 10px;font-size:.85rem;">Nombre</th>
+              <th style="padding:8px 10px;font-size:.85rem;">Rol</th>
+              <th style="padding:8px 10px;font-size:.85rem;">Tarjeta NFC</th>
+              <th style="padding:8px 10px;font-size:.85rem;"></th>
+            </tr>
+          </thead>
+          <tbody>${filas}</tbody>
+        </table>`;
+    }
+
+    function abrirModalUsuario(usuario) {
+      _usuarioEditando = usuario;
+      _tarjetaNFCModal = usuario.tarjeta_uid || null;
+      _nfcModalActivo  = false;
+
+      document.getElementById("editUserId").value    = usuario.id || "";
+      document.getElementById("editNombre").value    = usuario.nombre_completo || "";
+      document.getElementById("editTelefono").value  = usuario.telefono || "";
+      document.getElementById("editCorreo").value    = usuario.correo || "";
+      document.getElementById("editCurp").value      = usuario.curp || "";
+      document.getElementById("editAnio").value      = usuario.anio_nacimiento || "";
+      document.getElementById("editSexo").value      = usuario.sexo || "";
+      document.getElementById("editRol").value       = usuario.rol || "docente";
+
+      const lbl = document.getElementById("editTarjetaLabel");
+      lbl.textContent = _tarjetaNFCModal || "Sin tarjeta";
+      lbl.style.color = _tarjetaNFCModal ? "#2e7d32" : "#757575";
+
+      document.getElementById("estadoNFCEdit").style.display = "none";
+      document.getElementById("msgEditarUsuario").textContent = "";
+      document.getElementById("modalUsuarioTitulo").textContent =
+        `Editar: ${usuario.nombre_completo || usuario.username}`;
+
+      document.getElementById("modalUsuario").style.display = "block";
+    }
+
+    function cerrarModalUsuario() {
+      _modoCapturaTarjetaModal = false;
+      _nfcModalActivo = false;
+      document.getElementById("modalUsuario").style.display = "none";
+    }
+
+    function toggleLecturaEnModal() {
+      const btn = document.getElementById("btnLeerTarjetaEdit");
+      const st  = document.getElementById("estadoNFCEdit");
+
+      if (_nfcModalActivo) {
+        _modoCapturaTarjetaModal = false;
+        _nfcModalActivo = false;
+        btn.textContent = "Leer tarjeta";
+        btn.style.background = "#1976d2";
+        st.style.display = "none";
+        return;
+      }
+
+      _nfcModalActivo = true;
+      _modoCapturaTarjetaModal = true;
+      btn.textContent = "Cancelar";
+      btn.style.background = "#c62828";
+      st.textContent = "Acerca la tarjeta al lector NFC...";
+      st.style.display = "block";
+    }
+
+    function quitarTarjetaUsuario() {
+      _tarjetaNFCModal = "";
+      const lbl = document.getElementById("editTarjetaLabel");
+      lbl.textContent = "Sin tarjeta";
+      lbl.style.color = "#757575";
+      document.getElementById("estadoNFCEdit").style.display = "none";
+    }
+
+    async function guardarUsuario(e) {
+      e.preventDefault();
+      const msgEl = document.getElementById("msgEditarUsuario");
+      msgEl.textContent = "Guardando...";
+      msgEl.style.color = "#555";
+
+      const payload = {
+        id:             document.getElementById("editUserId").value,
+        nombre_completo: document.getElementById("editNombre").value.trim(),
+        telefono:        document.getElementById("editTelefono").value.trim(),
+        correo:          document.getElementById("editCorreo").value.trim(),
+        curp:            document.getElementById("editCurp").value.trim().toUpperCase(),
+        anio_nacimiento: Number(document.getElementById("editAnio").value) || null,
+        sexo:            document.getElementById("editSexo").value,
+        rol:             document.getElementById("editRol").value,
+        tarjeta_uid:     _tarjetaNFCModal !== null ? (_tarjetaNFCModal || "") : undefined
+      };
+
+      const res = await appActualizarUsuario(payload);
+      if (!res.ok) {
+        msgEl.textContent = res.message || "Error al guardar.";
+        msgEl.style.color = "#c62828";
+        return;
+      }
+
+      msgEl.textContent = "Usuario actualizado correctamente.";
+      msgEl.style.color = "#2e7d32";
+      setTimeout(async () => {
+        cerrarModalUsuario();
+        await cargarListaUsuarios();
+      }, 800);
+    }
   </script>
 </body>
 </html>
