@@ -72,6 +72,18 @@
           <input id="masterPassword" type="password" required>
         </label>
 
+        <!-- Asignación de tarjeta NFC -->
+        <div class="nfc-asignacion-usuario">
+          <p class="nfc-label">Tarjeta NFC <span class="nfc-label-opt">(opcional)</span></p>
+          <div class="nfc-uid-display">
+            <span id="tarjetaUIDLabel">Sin tarjeta asignada</span>
+            <button type="button" id="btnLeerTarjeta" class="btn-leer-tarjeta" onclick="toggleLecturaTarjeta()">
+              Leer tarjeta
+            </button>
+          </div>
+          <p id="estadoNFCReg" class="login-msg" style="display:none;"></p>
+        </div>
+
         <button type="submit" id="btnRegistrarUsuario" class="btn-login">Registrar usuario</button>
       </form>
 
@@ -83,16 +95,101 @@
     </section>
   </main>
 
+  <style>
+    .nfc-asignacion-usuario {
+      border: 1.5px dashed #90caf9;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin: 4px 0 10px;
+      background: #f0f7ff;
+    }
+    .nfc-label { font-size: .85rem; color: #555; margin: 0 0 6px; font-weight: 600; }
+    .nfc-label-opt { font-weight: 400; color: #999; }
+    .nfc-uid-display {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .nfc-uid-display span {
+      flex: 1;
+      font-family: monospace;
+      font-size: .9rem;
+      color: #333;
+    }
+    .btn-leer-tarjeta {
+      background: #1976d2;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: .85rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-leer-tarjeta.activo { background: #c62828; }
+    .btn-leer-tarjeta:hover { filter: brightness(1.1); }
+  </style>
+
   <script src="js/storage.js?v=20260310b"></script>
-  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/auth.js?v=20260312b"></script>
   <script>
-    const form = document.getElementById("formRegistroUsuario");
-    const msg = document.getElementById("registroMsg");
-    const btn = document.getElementById("btnRegistrarUsuario");
+    const form   = document.getElementById("formRegistroUsuario");
+    const msg    = document.getElementById("registroMsg");
+    const btn    = document.getElementById("btnRegistrarUsuario");
+
+    let tarjetaUID = "";
+    let nfcLeyendo = false;
 
     function setMsg(texto, tipo = "info") {
       msg.textContent = texto;
-      msg.className = `login-msg ${tipo}`;
+      msg.className   = `login-msg ${tipo}`;
+    }
+
+    function setNFCMsg(texto, tipo = "info") {
+      const el = document.getElementById("estadoNFCReg");
+      el.textContent   = texto;
+      el.className     = `login-msg ${tipo}`;
+      el.style.display = texto ? "block" : "none";
+    }
+
+    function actualizarUITarjeta() {
+      const label = document.getElementById("tarjetaUIDLabel");
+      label.textContent = tarjetaUID || "Sin tarjeta asignada";
+      label.style.color = tarjetaUID ? "#2e7d32" : "#757575";
+    }
+
+    function toggleLecturaTarjeta() {
+      const btnT = document.getElementById("btnLeerTarjeta");
+
+      if (nfcLeyendo) {
+        detenerNFCLogin();
+        nfcLeyendo = false;
+        btnT.textContent = "Leer tarjeta";
+        btnT.classList.remove("activo");
+        setNFCMsg("", "");
+        return;
+      }
+
+      nfcLeyendo = true;
+      btnT.textContent = "Cancelar";
+      btnT.classList.add("activo");
+      setNFCMsg("Acerca la tarjeta al lector...", "info");
+
+      iniciarNFCLogin({
+        onUID: uid => {
+          detenerNFCLogin();
+          nfcLeyendo = false;
+          btnT.textContent = "Leer tarjeta";
+          btnT.classList.remove("activo");
+          tarjetaUID = uid;
+          actualizarUITarjeta();
+          setNFCMsg(`Tarjeta asignada: ${uid}`, "ok");
+        },
+        onError: () => {
+          setNFCMsg("Error al leer el lector NFC.", "error");
+        }
+      });
     }
 
     function validarCurp(curp) {
@@ -102,19 +199,19 @@
     form.addEventListener("submit", async e => {
       e.preventDefault();
 
-      const rol = document.getElementById("rol").value.trim().toLowerCase();
+      const rol           = document.getElementById("rol").value.trim().toLowerCase();
       const nombreCompleto = document.getElementById("nombreCompleto").value.trim();
-      const telefono = document.getElementById("telefono").value.trim();
-      const correo = document.getElementById("correo").value.trim().toLowerCase();
-      const curp = document.getElementById("curp").value.trim().toUpperCase();
+      const telefono      = document.getElementById("telefono").value.trim();
+      const correo        = document.getElementById("correo").value.trim().toLowerCase();
+      const curp          = document.getElementById("curp").value.trim().toUpperCase();
       const anioNacimiento = Number(document.getElementById("anioNacimiento").value);
-      const sexo = document.getElementById("sexo").value.trim().toUpperCase();
-      const username = document.getElementById("username").value.trim().toLowerCase();
-      const password = document.getElementById("password").value;
+      const sexo          = document.getElementById("sexo").value.trim().toUpperCase();
+      const username      = document.getElementById("username").value.trim().toLowerCase();
+      const password      = document.getElementById("password").value;
       const masterPassword = document.getElementById("masterPassword").value;
 
       if (!rol || !nombreCompleto || !telefono || !correo || !curp || !anioNacimiento || !sexo || !username || !password || !masterPassword) {
-        setMsg("Completa todos los campos", "error");
+        setMsg("Completa todos los campos obligatorios.", "error");
         return;
       }
 
@@ -143,10 +240,6 @@
       setMsg("Registrando usuario...", "info");
 
       try {
-        if (typeof appAuthRegisterUser !== "function") {
-          throw new Error("Modulo de autenticacion no disponible");
-        }
-
         const out = await appAuthRegisterUser({
           rol,
           nombre_completo: nombreCompleto,
@@ -161,17 +254,19 @@
         });
 
         if (!out?.ok) {
-          setMsg(out?.message || "No se pudo registrar el usuario", "error");
+          setMsg(out?.message || "No se pudo registrar el usuario.", "error");
           return;
         }
 
-        setMsg("Usuario registrado correctamente. Redirigiendo a login...", "ok");
-        setTimeout(() => {
-          location.href = "login.html";
-        }, 900);
+        // Si se asignó tarjeta, actualizar el usuario recién creado
+        if (tarjetaUID && out.user?.id) {
+          await appActualizarUsuario({ id: out.user.id, tarjeta_uid: tarjetaUID });
+        }
+
+        setMsg("Usuario registrado correctamente. Redirigiendo...", "ok");
+        setTimeout(() => { location.href = "login.html"; }, 900);
       } catch (err) {
-        console.error(err);
-        setMsg(err?.message || "No se pudo registrar el usuario", "error");
+        setMsg(err?.message || "No se pudo registrar el usuario.", "error");
       } finally {
         btn.disabled = false;
       }
@@ -179,5 +274,3 @@
   </script>
 </body>
 </html>
-
-
