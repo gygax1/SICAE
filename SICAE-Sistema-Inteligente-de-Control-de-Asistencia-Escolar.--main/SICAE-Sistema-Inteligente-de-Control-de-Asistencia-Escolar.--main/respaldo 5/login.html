@@ -27,6 +27,17 @@
         <button type="submit" id="btnLogin" class="btn-login">Iniciar sesión</button>
       </form>
 
+      <div class="login-divider">
+        <span>o</span>
+      </div>
+
+      <div class="nfc-login-zona">
+        <button id="btnNFC" class="btn-nfc-login" type="button" onclick="toggleNFCLogin()">
+          Entrar con tarjeta NFC
+        </button>
+        <p id="estadoNFC" class="login-msg" style="display:none;"></p>
+      </div>
+
       <div class="login-alt-actions">
         <a class="btn-plantilla" href="registro_usuario.html">Registrar usuario</a>
       </div>
@@ -35,19 +46,61 @@
     </section>
   </main>
 
+  <style>
+    .login-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 14px 0 10px;
+      color: #aaa;
+      font-size: .85rem;
+    }
+    .login-divider::before,
+    .login-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: #e0e0e0;
+    }
+    .nfc-login-zona { text-align: center; margin-bottom: 8px; }
+    .btn-nfc-login {
+      background: #1976d2;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: .95rem;
+      cursor: pointer;
+      width: 100%;
+      transition: background .2s;
+    }
+    .btn-nfc-login.activo { background: #c62828; }
+    .btn-nfc-login:hover { filter: brightness(1.1); }
+  </style>
+
   <script src="js/storage.js?v=20260310b"></script>
-  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/auth.js?v=20260312b"></script>
   <script>
-    const form = document.getElementById("formLogin");
-    const msg = document.getElementById("loginMsg");
-    const btn = document.getElementById("btnLogin");
+    const form     = document.getElementById("formLogin");
+    const msg      = document.getElementById("loginMsg");
+    const btn      = document.getElementById("btnLogin");
+    const btnNFC   = document.getElementById("btnNFC");
+    const estadoNFC = document.getElementById("estadoNFC");
 
     const params = new URLSearchParams(location.search);
-    const next = params.get("next") || "index.html";
+    const next   = params.get("next") || "index.html";
+
+    let nfcActivo = false;
 
     function setMsg(texto, tipo = "info") {
-      msg.textContent = texto;
-      msg.className = `login-msg ${tipo}`;
+      msg.textContent   = texto;
+      msg.className     = `login-msg ${tipo}`;
+    }
+
+    function setNFCMsg(texto, tipo = "info") {
+      estadoNFC.textContent = texto;
+      estadoNFC.className   = `login-msg ${tipo}`;
+      estadoNFC.style.display = texto ? "block" : "none";
     }
 
     window.addEventListener("load", () => {
@@ -56,9 +109,19 @@
       }
     });
 
+    async function finalizarLogin(out) {
+      if (!out?.ok || !out?.user?.id) {
+        setMsg(out?.message || "Acceso denegado.", "error");
+        return;
+      }
+      const token = typeof getAuthToken === "function" ? getAuthToken() : (window.SUPABASE_ANON_KEY || "");
+      setAuthSession(token, out.user, { markDay: true });
+      setMsg(`Bienvenido ${out.user.nombre}. Redirigiendo...`, "ok");
+      setTimeout(() => { location.href = next; }, 500);
+    }
+
     form.addEventListener("submit", async e => {
       e.preventDefault();
-
       const username = document.getElementById("username").value.trim().toLowerCase();
       const password = document.getElementById("password").value;
 
@@ -71,31 +134,51 @@
       setMsg("Validando credenciales...", "info");
 
       try {
-        if (typeof appAuthLogin !== "function") {
-          throw new Error("Modulo de autenticacion no disponible");
-        }
-
         const out = await appAuthLogin({ username, password });
-        if (!out?.ok || !out?.user?.id) {
-          setMsg(out?.message || "Usuario o contraseña inválidos.", "error");
-          return;
-        }
-
-        const token = typeof getAuthToken === "function" ? getAuthToken() : (window.SUPABASE_ANON_KEY || "");
-        setAuthSession(token, out.user, { markDay: true });
-
-        setMsg(`Bienvenido ${out.user.nombre}. Redirigiendo...`, "ok");
-        setTimeout(() => {
-          location.href = next;
-        }, 500);
+        await finalizarLogin(out);
       } catch (err) {
-        console.error(err);
         setMsg(err?.message || "No se pudo iniciar sesión.", "error");
       } finally {
         btn.disabled = false;
       }
     });
+
+    function toggleNFCLogin() {
+      if (nfcActivo) {
+        detenerNFCLogin();
+        nfcActivo = false;
+        btnNFC.textContent = "Entrar con tarjeta NFC";
+        btnNFC.classList.remove("activo");
+        setNFCMsg("", "");
+        return;
+      }
+
+      nfcActivo = true;
+      btnNFC.textContent = "Cancelar lectura NFC";
+      btnNFC.classList.add("activo");
+      setNFCMsg("Acerca la tarjeta al lector...", "info");
+
+      iniciarNFCLogin({
+        onUID: async uid => {
+          detenerNFCLogin();
+          nfcActivo = false;
+          btnNFC.textContent = "Entrar con tarjeta NFC";
+          btnNFC.classList.remove("activo");
+          setNFCMsg(`Tarjeta detectada: ${uid}`, "info");
+
+          const out = await appAuthLoginPorTarjeta(uid);
+          if (!out?.ok) {
+            setNFCMsg(out?.message || "Tarjeta no registrada.", "error");
+            return;
+          }
+          await finalizarLogin(out);
+        },
+        onError: err => {
+          setNFCMsg("Error en lector NFC.", "error");
+          console.warn("[NFC LOGIN]", err);
+        }
+      });
+    }
   </script>
 </body>
 </html>
-
