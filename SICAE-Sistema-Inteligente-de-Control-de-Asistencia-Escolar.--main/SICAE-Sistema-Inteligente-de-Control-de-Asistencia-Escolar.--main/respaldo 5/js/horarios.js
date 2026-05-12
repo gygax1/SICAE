@@ -126,12 +126,19 @@ function defaultMapa() {
       dias: [...DIAS_SEMANA],
       periodos: DEFAULT_PERIODOS.map(p => ({ ...p }))
     },
+    materias: [],
     grupos: [],
     docentes: [],
     salones: [],
     clases: [],
     updated_at: new Date().toISOString()
   };
+}
+
+function normMateria(item = {}) {
+  const nombre = normText(item.nombre || item.name || String(item || ""));
+  const id = normText(item.id || "") || slug(nombre) || uidSimple();
+  return { id, nombre };
 }
 
 function normPeriodo(item = {}, index = 0) {
@@ -214,6 +221,10 @@ function normalizarMapa(raw = {}) {
   const periodosRaw = Array.isArray(map?.config?.periodos) ? map.config.periodos : base.config.periodos;
   const periodos = periodosRaw.map((p, idx) => normPeriodo(p, idx));
 
+  const materias = Array.isArray(map.materias)
+    ? map.materias.map(normMateria).filter(m => m.nombre)
+    : [];
+
   const grupos = Array.isArray(map.grupos)
     ? map.grupos.map(normGrupo).filter(g => g.key)
     : [];
@@ -243,6 +254,7 @@ function normalizarMapa(raw = {}) {
       dias: [...DIAS_SEMANA],
       periodos
     },
+    materias: dedupeBy(materias, m => m.id),
     grupos: dedupeBy(Array.from(gruposMap.values()), g => g.key),
     docentes: dedupeBy(docentes, d => d.id),
     salones: dedupeBy(salones, s => s.id),
