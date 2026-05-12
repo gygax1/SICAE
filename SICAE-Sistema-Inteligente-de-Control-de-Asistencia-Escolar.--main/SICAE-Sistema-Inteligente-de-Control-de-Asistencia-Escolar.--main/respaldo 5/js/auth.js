@@ -410,6 +410,149 @@ function hydrateAuthUI() {
   });
 }
 
+/* ======================================================
+   ===== NFC LOGIN (polling directo, sin realtime.js) ===
+====================================================== */
+
+let _nfcLoginTimer = null;
+let _nfcLoginActivo = false;
+
+async function _claimNFCParaLogin() {
+  const base = getApiBaseURLForAuth().replace(/\/+$/, "");
+  const url = `${base}/rpc/claim_next_nfc_event`;
+  const token = getAuthToken();
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${token}`
+      },
+      body: "{}",
+      credentials: shouldIncludeCredentials(url) ? "include" : "omit"
+    });
+    if (!res.ok) return null;
+    const raw = await res.text();
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function iniciarNFCLogin({ onUID, onError } = {}) {
+  if (_nfcLoginActivo) return;
+  _nfcLoginActivo = true;
+
+  const poll = async () => {
+    if (!_nfcLoginActivo) return;
+    try {
+      const ev = await _claimNFCParaLogin();
+      const uid = String(ev?.uid || ev?.tarjeta_uid || "").trim().toUpperCase();
+      if (uid && typeof onUID === "function") onUID(uid);
+    } catch (err) {
+      if (typeof onError === "function") onError(err?.message || err);
+    }
+  };
+
+  poll();
+  _nfcLoginTimer = setInterval(poll, 900);
+}
+
+function detenerNFCLogin() {
+  _nfcLoginActivo = false;
+  if (_nfcLoginTimer) {
+    clearInterval(_nfcLoginTimer);
+    _nfcLoginTimer = null;
+  }
+}
+
+async function appAuthLoginPorTarjeta(uid) {
+  try {
+    const uidN = String(uid || "").trim().toUpperCase();
+    if (!uidN) throw new Error("UID vacío");
+
+    const res = await callAuthRpc("app_login_por_tarjeta", { p_uid: uidN });
+    const out = objetoRespuesta(res) || {};
+    const user = normalizarUsuario(out.user || out);
+    if (!user.id) throw new Error("Login por tarjeta sin respuesta válida");
+
+    return {
+      ok: true,
+      user,
+      message: String(out.message || "Sesión iniciada por tarjeta")
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      code: String(err?.payload?.code || err?.status || "AUTH_NFC_ERROR"),
+      message: authErrorMessage(err, "Tarjeta no registrada o no autorizada")
+    };
+  }
+}
+
+/* ======================================================
+   ===== GESTIÓN DE USUARIOS (solo dirección) ===========
+====================================================== */
+
+async function appObtenerUsuarios() {
+  try {
+    const base = getApiBaseURLForAuth().replace(/\/+$/, "");
+    const campos = "id,username,nombre_completo,rol,telefono,correo,curp,anio_nacimiento,sexo,tarjeta_uid,activo,created_at";
+    const url = `${base}/app_usuarios?select=${campos}&order=nombre_completo.asc`;
+    const token = getAuthToken();
+
+    const res = await fetch(url, {
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${token}`
+      },
+      credentials: shouldIncludeCredentials(url) ? "include" : "omit"
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return { ok: true, usuarios: Array.isArray(data) ? data : [] };
+  } catch (err) {
+    return {
+      ok: false,
+      message: authErrorMessage(err, "No se pudo obtener la lista de usuarios"),
+      usuarios: []
+    };
+  }
+}
+
+async function appActualizarUsuario(payload = {}) {
+  try {
+    const res = await callAuthRpc("app_actualizar_usuario", {
+      p_id:             String(payload.id || ""),
+      p_nombre_completo: payload.nombre_completo != null ? String(payload.nombre_completo) : undefined,
+      p_telefono:        payload.telefono != null ? String(payload.telefono) : undefined,
+      p_correo:          payload.correo != null ? String(payload.correo) : undefined,
+      p_curp:            payload.curp != null ? String(payload.curp).toUpperCase() : undefined,
+      p_anio_nacimiento: payload.anio_nacimiento != null ? Number(payload.anio_nacimiento) || null : undefined,
+      p_sexo:            payload.sexo != null ? String(payload.sexo).toUpperCase() : undefined,
+      p_tarjeta_uid:     payload.tarjeta_uid != null ? String(payload.tarjeta_uid).toUpperCase() : undefined,
+      p_rol:             payload.rol != null ? String(payload.rol).toLowerCase() : undefined,
+      p_activo:          payload.activo != null ? Boolean(payload.activo) : undefined
+    });
+
+    const out = objetoRespuesta(res) || {};
+    return {
+      ok: true,
+      user: normalizarUsuario(out.user || out),
+      message: String(out.message || "Usuario actualizado")
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: authErrorMessage(err, "No se pudo actualizar el usuario")
+    };
+  }
+}
+
 window.AUTH_TOKEN_KEY = AUTH_TOKEN_KEY;
 window.AUTH_USER_KEY = AUTH_USER_KEY;
 window.AUTH_LOGIN_DAY_KEY = AUTH_LOGIN_DAY_KEY;
@@ -428,6 +571,11 @@ window.enableAuthBypass = () => false;
 window.isAuthSessionActiveToday = isAuthSessionActiveToday;
 window.appAuthRegisterUser = appAuthRegisterUser;
 window.appAuthLogin = appAuthLogin;
+window.appAuthLoginPorTarjeta = appAuthLoginPorTarjeta;
+window.iniciarNFCLogin = iniciarNFCLogin;
+window.detenerNFCLogin = detenerNFCLogin;
+window.appObtenerUsuarios = appObtenerUsuarios;
+window.appActualizarUsuario = appActualizarUsuario;
 window.DEFAULT_API_BASE_URL = DEFAULT_API_BASE_URL;
 window.SUPABASE_PROJECT_URL = SUPABASE_PROJECT_URL;
 window.SUPABASE_REST_URL = SUPABASE_REST_URL;
