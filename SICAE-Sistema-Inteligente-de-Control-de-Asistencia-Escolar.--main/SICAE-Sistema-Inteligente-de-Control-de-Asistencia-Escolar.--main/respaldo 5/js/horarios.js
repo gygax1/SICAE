@@ -163,10 +163,14 @@ function normDocente(item = {}) {
   const nombre = normText(item.nombre || item.full_name || "");
   const idRaw = normText(item.id || "");
   const id = idRaw || username || slug(nombre) || uidSimple();
+  const materias = Array.isArray(item.materias)
+    ? [...new Set(item.materias.map(m => normText(m)).filter(Boolean))]
+    : [];
   return {
     id,
     username,
-    nombre: nombre || username || id
+    nombre: nombre || username || id,
+    materias
   };
 }
 
