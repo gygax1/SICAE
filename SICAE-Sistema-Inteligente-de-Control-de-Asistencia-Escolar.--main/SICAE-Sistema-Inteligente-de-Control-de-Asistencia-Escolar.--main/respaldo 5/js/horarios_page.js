@@ -410,6 +410,25 @@ function horaRango(periodo = {}) {
   return `${ini} - ${fin}`;
 }
 
+function hmToMins(hm = "") {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hm || "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+const PALETA_COLORES = [
+  "#b3e5fc", "#c8e6c9", "#ffccbc", "#e1bee7", "#b2dfdb",
+  "#f8bbd0", "#fff9c4", "#dcedc8", "#ffe0b2", "#d1c4e9",
+  "#b3e0ff", "#f0f4c3", "#ffd180", "#ea80fc", "#80cbc4"
+];
+
+function colorParaMateria(materia) {
+  if (!materia) return "#f5f5f5";
+  let h = 0;
+  for (const c of String(materia)) h = (h * 31 + c.charCodeAt(0)) | 0;
+  return PALETA_COLORES[Math.abs(h) % PALETA_COLORES.length];
+}
+
 function obtenerClaseVista(dia, periodoNum) {
   const slot = Number(periodoNum || 0);
   if (!slot) return null;
@@ -436,51 +455,88 @@ function obtenerClaseVista(dia, periodoNum) {
 function renderMapa() {
   tablaMapaHorarios.innerHTML = "";
 
+  // Actualizar título del grupo/docente encima de la tabla
+  const tituloEl = document.getElementById("tituloGrupoHorario");
+  if (tituloEl) {
+    if (modoVista === "grupo") {
+      const g = (mapa.grupos || []).find(x => String(x.key || "") === grupoActivo);
+      tituloEl.textContent = g?.label || grupoActivo || "";
+    } else {
+      const d = (mapa.docentes || []).find(x => String(x.id || "") === docenteActivo);
+      tituloEl.textContent = d ? labelDocente(d) : "";
+    }
+  }
+
   const periodos = (mapa?.config?.periodos || [])
     .slice()
     .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
-  const bloqueSinEntidad = (modoVista === "grupo" && !grupoActivo) || (modoVista === "docente" && !docenteActivo);
 
-  periodos.forEach(periodo => {
+  const sinEntidad = (modoVista === "grupo" && !grupoActivo) ||
+                     (modoVista === "docente" && !docenteActivo);
+  const editable   = puedeEditar && modoVista === "grupo" && !!grupoActivo && !sinEntidad;
+
+  periodos.forEach((periodo, idx) => {
+    // Insertar fila de RECESO si hay una brecha >= 15 min entre periodos
+    if (idx > 0) {
+      const prev      = periodos[idx - 1];
+      const finPrev   = hmToMins(prev.fin);
+      const iniActual = hmToMins(periodo.inicio);
+      if (finPrev !== null && iniActual !== null && iniActual - finPrev >= 15) {
+        const trR  = document.createElement("tr");
+        trR.className = "horario-receso-row";
+        const tdR  = document.createElement("td");
+        tdR.colSpan = 6;
+        tdR.innerHTML = `<strong>RECESO</strong><span>${prev.fin} – ${periodo.inicio}</span>`;
+        trR.appendChild(tdR);
+        tablaMapaHorarios.appendChild(trR);
+      }
+    }
+
     const tr = document.createElement("tr");
 
-    const tdPeriodo = document.createElement("td");
-    tdPeriodo.className = "periodo-label";
-    tdPeriodo.innerHTML = `<strong>${periodo.numero}</strong><br><span>${horaRango(periodo)}</span>`;
-    tr.appendChild(tdPeriodo);
+    // Columna de periodo (número + rango horario)
+    const tdP = document.createElement("td");
+    tdP.className = "periodo-label";
+    tdP.innerHTML = `<strong>${periodo.numero}</strong><br><span>${horaRango(periodo)}</span>`;
+    tr.appendChild(tdP);
 
     DIAS.forEach(d => {
-      const td = document.createElement("td");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cell-horario";
+      const td    = document.createElement("td");
+      td.className = "horario-td";
 
       const clase = obtenerClaseVista(d.code, periodo.numero);
 
       if (!clase) {
-        btn.classList.add("is-empty");
-        btn.innerHTML = `<span class="cell-title">Sin asignar</span><span class="cell-meta">${bloqueSinEntidad ? "Selecciona entidad" : "Disponible"}</span>`;
+        const div = document.createElement("div");
+        div.className = "horario-celda horario-celda-vacia";
+        div.textContent = editable ? "＋" : "";
+        if (editable) {
+          div.addEventListener("click", () => abrirEditor(d.code, Number(periodo.numero || 0), null));
+        }
+        td.appendChild(div);
       } else {
-        const materia = String(clase.materia || "Clase");
-        const meta1 = modoVista === "grupo"
-          ? (String(clase.docente_nombre || clase.docente_username || "Docente") || "Docente")
-          : String(clase.grupo_label || clase.grupo_key || "Grupo");
-        const meta2 = String(clase.salon_nombre || clase.salon_id || clase.lector_id || "-");
-        const extra = modoVista === "docente" && Number(clase._total || 0) > 1
-          ? ` (+${Number(clase._total || 0) - 1})`
-          : "";
+        const color    = colorParaMateria(clase.materia);
+        const materia  = String(clase.materia || "Clase");
+        const docLabel = modoVista === "grupo"
+          ? String(clase.docente_nombre || clase.docente_username || "").trim()
+          : String(clase.grupo_label || clase.grupo_key || "").trim();
+        const salon    = String(clase.salon_nombre || clase.lector_id || "").trim();
+        const extra    = modoVista === "docente" && Number(clase._total || 0) > 1
+          ? ` <em style="font-size:.68rem;">(+${Number(clase._total || 0) - 1} más)</em>` : "";
 
-        btn.innerHTML = `<span class="cell-title">${materia}${extra}</span><span class="cell-meta">${meta1}</span><span class="cell-meta">${meta2}</span>`;
+        const div = document.createElement("div");
+        div.className = "horario-celda horario-celda-llena";
+        div.style.background = color;
+        div.innerHTML = `
+          <span class="hc-materia">${materia}${extra}</span>
+          ${docLabel ? `<span class="hc-docente">${docLabel}</span>` : ""}
+          ${salon    ? `<span class="hc-salon">${salon}</span>`      : ""}`;
+        if (editable) {
+          div.addEventListener("click", () => abrirEditor(d.code, Number(periodo.numero || 0), clase));
+        }
+        td.appendChild(div);
       }
 
-      const editable = puedeEditar && modoVista === "grupo" && !!grupoActivo;
-      if (!editable) {
-        btn.classList.add("is-view-only");
-      } else {
-        btn.addEventListener("click", () => abrirEditor(d.code, Number(periodo.numero || 0), clase));
-      }
-
-      td.appendChild(btn);
       tr.appendChild(td);
     });
 
