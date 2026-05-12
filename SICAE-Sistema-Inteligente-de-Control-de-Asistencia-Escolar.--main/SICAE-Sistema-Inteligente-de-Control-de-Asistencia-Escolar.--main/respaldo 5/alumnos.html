@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lista de Alumnos</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body data-requires-auth="true">
+  <header class="header-brand">
+    <div class="brand">
+      <img src="img/logo.png" alt="Control Escolar">
+      <div>
+        <h2>Alumnos</h2>
+        <p class="brand-sub">Listado por grado y grupo</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="session-pill" data-auth-user>Sin sesión</span>
+      <button id="btnModoEdicion" class="btn-sec" data-role-allow="direccion" data-role-hide-if-denied="true" type="button">Modo edición: OFF</button>
+      <button class="btn-sec" onclick="location.href='index.html'">Volver</button>
+      <button class="btn-sec" data-auth-logout>Salir</button>
+    </div>
+  </header>
+
+  <section id="panelEdicionAlumno" class="registro-shell" style="display:none;">
+    <h3>Editar alumno</h3>
+    <p id="estadoEdicion" class="screen-status info">Selecciona un alumno y actualiza sus datos.</p>
+
+    <div class="registro-grid">
+      <input id="edNombre" placeholder="Nombre completo">
+      <input id="edCorreo" type="email" placeholder="Correo">
+      <input id="edFechaNacimiento" type="date" placeholder="Fecha de nacimiento">
+      <input id="edTelefono" type="tel" placeholder="Teléfono">
+      <input id="edMatricula" placeholder="Matrícula">
+      <input id="edGrado" placeholder="Grado (ej: 1, 2, 3)">
+      <input id="edGrupo" placeholder="Grupo (ej: A, B)">
+      <input id="edTarjetaUID" placeholder="UID tarjeta NFC">
+
+      <select id="edTipoSangre">
+        <option value="">Tipo de sangre</option>
+        <option value="A+">A+</option>
+        <option value="A-">A-</option>
+        <option value="B+">B+</option>
+        <option value="B-">B-</option>
+        <option value="AB+">AB+</option>
+        <option value="AB-">AB-</option>
+        <option value="O+">O+</option>
+        <option value="O-">O-</option>
+      </select>
+
+      <input id="edTutorNombre" placeholder="Nombre completo del tutor">
+      <select id="edTutorParentesco">
+        <option value="">Parentesco del tutor</option>
+        <option value="MADRE">Madre</option>
+        <option value="PADRE">Padre</option>
+        <option value="TUTOR_LEGAL">Tutor legal</option>
+        <option value="ABUELA">Abuela</option>
+        <option value="ABUELO">Abuelo</option>
+        <option value="HERMANA">Hermana</option>
+        <option value="HERMANO">Hermano</option>
+        <option value="TIA">Tía</option>
+        <option value="TIO">Tío</option>
+        <option value="OTRO_FAMILIAR">Otro familiar</option>
+      </select>
+      <input id="edTutorTelefono" type="tel" placeholder="Teléfono del tutor">
+      <input id="edTutorCorreo" type="email" placeholder="Correo del tutor">
+      <textarea id="edAlergias" rows="2" placeholder="Alergias del alumno"></textarea>
+    </div>
+
+    <div class="registro-acciones">
+      <button id="btnGuardarEdicion" class="btn-registrar" type="button">Guardar cambios</button>
+      <button id="btnCancelarEdicion" class="btn-sec" type="button">Cancelar</button>
+    </div>
+  </section>
+
+  <section class="search-bar">
+    <input id="busquedaAlumnos" placeholder="Buscar por nombre, matrícula, correo o UID...">
+  </section>
+
+  <p id="estadoAlumnos" class="screen-status loading">Cargando alumnos...</p>
+
+  <div class="table-shell" style="max-height:72vh;">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Nombre</th>
+          <th>Matrícula</th>
+          <th>Grado / Grupo</th>
+          <th>Tipo sangre</th>
+          <th>Tutor</th>
+          <th>UID</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tablaAlumnos"></tbody>
+    </table>
+  </div>
+
+  <script src="js/storage.js?v=20260310a"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/realtime.js?v=20260312a"></script>
+
+  <script>
+    const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+    const TUTOR_RELATIONS = [
+      "MADRE",
+      "PADRE",
+      "TUTOR_LEGAL",
+      "ABUELA",
+      "ABUELO",
+      "HERMANA",
+      "HERMANO",
+      "TIA",
+      "TIO",
+      "OTRO_FAMILIAR"
+    ];
+
+    const busquedaAlumnos = document.getElementById("busquedaAlumnos");
+    const estadoAlumnos = document.getElementById("estadoAlumnos");
+    const tablaAlumnos = document.getElementById("tablaAlumnos");
+    const btnModoEdicion = document.getElementById("btnModoEdicion");
+    const panelEdicionAlumno = document.getElementById("panelEdicionAlumno");
+    const estadoEdicion = document.getElementById("estadoEdicion");
+    const btnGuardarEdicion = document.getElementById("btnGuardarEdicion");
+    const btnCancelarEdicion = document.getElementById("btnCancelarEdicion");
+
+    let alumnos = [];
+    let modoEdicion = false;
+    let alumnoEditandoId = null;
+    let rolActual = "";
+
+    window.addEventListener("load", initAlumnos);
+
+    function setEstado(msg, tipo = "info") {
+      estadoAlumnos.textContent = msg || "";
+      estadoAlumnos.className = `screen-status ${tipo}`;
+      estadoAlumnos.style.display = msg ? "block" : "none";
+    }
+
+    function setEstadoEdicion(msg, tipo = "info") {
+      estadoEdicion.textContent = msg || "";
+      estadoEdicion.className = `screen-status ${tipo}`;
+    }
+
+    function normalizarTexto(value) {
+      return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+    }
+
+    function normalizarUIDLocal(uid) {
+      return String(uid || "").trim().toUpperCase();
+    }
+
+    function normalizarTipoSangre(value) {
+      const v = String(value || "").trim().toUpperCase();
+      return BLOOD_TYPES.includes(v) ? v : "";
+    }
+
+    function normalizarParentescoTutor(value) {
+      const v = String(value || "").trim().toUpperCase().replace(/\s+/g, "_");
+      return TUTOR_RELATIONS.includes(v) ? v : "";
+    }
+
+    function normalizarMatricula(valor) {
+      return String(valor || "").trim().toUpperCase();
+    }
+
+    function validarCorreo(correo) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(correo || "").trim());
+    }
+
+    function gradoGrupo(a) {
+      const grado = String(a?.grado || "").trim();
+      const grupo = String(a?.grupo || "").trim();
+      if (!grado && !grupo) return "-";
+      if (grado && grupo) return `${grado} / ${grupo}`;
+      return grado || grupo;
+    }
+
+    function tutorTexto(a) {
+      const nombre = String(a?.tutorNombre || "").trim();
+      const parentesco = String(a?.tutorParentesco || "").trim();
+      if (!nombre && !parentesco) return "-";
+      return `${nombre || "-"}${parentesco ? ` (${parentesco})` : ""}`;
+    }
+
+    function alumnoNormalizadoLocal(raw = {}) {
+      return {
+        id: String(raw.id || "").trim(),
+        nombre: String(raw.nombre || "").trim(),
+        correo: String(raw.correo || "").trim().toLowerCase(),
+        fechaNacimiento: String(raw.fechaNacimiento || raw.fecha_nacimiento || "").trim(),
+        telefono: String(raw.telefono || "").trim(),
+        matricula: normalizarMatricula(raw.matricula),
+        grado: String(raw.grado || "").trim().toUpperCase(),
+        grupo: String(raw.grupo || "").trim().toUpperCase(),
+        tipoSangre: normalizarTipoSangre(raw.tipoSangre || raw.tipo_sangre),
+        alergias: String(raw.alergias || "").trim(),
+        tutorNombre: String(raw.tutorNombre || raw.tutor_nombre || "").trim(),
+        tutorParentesco: normalizarParentescoTutor(raw.tutorParentesco || raw.tutor_parentesco),
+        tutorTelefono: String(raw.tutorTelefono || raw.tutor_telefono || "").trim(),
+        tutorCorreo: String(raw.tutorCorreo || raw.tutor_correo || "").trim().toLowerCase(),
+        tarjetaUID: normalizarUIDLocal(raw.tarjetaUID || raw.tarjeta_uid),
+        fechaRegistro: String(raw.fechaRegistro || raw.fecha_registro || "").trim()
+      };
+    }
+
+    function compararNatural(a, b) {
+      return String(a || "").localeCompare(String(b || ""), "es", {
+        sensitivity: "base",
+        numeric: true
+      });
+    }
+
+    function compararNivelAsc(a, b) {
+      const vA = String(a || "").trim().toUpperCase();
+      const vB = String(b || "").trim().toUpperCase();
+
+      const numA = /^\d+$/.test(vA);
+      const numB = /^\d+$/.test(vB);
+
+      if (numA && numB) return Number(vA) - Number(vB);
+      if (numA && !numB) return -1;
+      if (!numA && numB) return 1;
+
+      return compararNatural(vA, vB);
+    }
+
+    function compararPorGradoGrupoNombre(a, b) {
+      const cmpGrado = compararNivelAsc(a?.grado, b?.grado);
+      if (cmpGrado !== 0) return cmpGrado;
+
+      const cmpGrupo = compararNivelAsc(a?.grupo, b?.grupo);
+      if (cmpGrupo !== 0) return cmpGrupo;
+
+      const cmpNombre = compararNatural(String(a?.nombre || "").trim(), String(b?.nombre || "").trim());
+      if (cmpNombre !== 0) return cmpNombre;
+
+      return compararNatural(String(a?.matricula || "").trim(), String(b?.matricula || "").trim());
+    }
+
+    function cargarAlumnosLocalOrdenados() {
+      const raw = typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos");
+      const lista = (Array.isArray(raw) ? raw : [])
+        .filter(a => a && (a.id || a.nombre || a.matricula || a.tarjetaUID))
+        .map(alumnoNormalizadoLocal);
+
+      return lista.sort((a, b) => compararPorGradoGrupoNombre(a, b));
+    }
+
+    function coincideBusqueda(a, query) {
+      if (!query) return true;
+
+      const nombre = normalizarTexto(a?.nombre || "");
+      const matricula = normalizarTexto(a?.matricula || "");
+      const correo = normalizarTexto(a?.correo || "");
+      const uid = normalizarTexto(a?.tarjetaUID || "");
+      const tutor = normalizarTexto(a?.tutorNombre || "");
+      return nombre.includes(query) || matricula.includes(query) || correo.includes(query) || uid.includes(query) || tutor.includes(query);
+    }
+
+    function getAlumnoById(id) {
+      return alumnos.find(a => String(a.id) === String(id)) || null;
+    }
+
+    function renderAlumnos() {
+      const query = normalizarTexto(busquedaAlumnos.value);
+      const lista = alumnos.filter(a => coincideBusqueda(a, query));
+
+      tablaAlumnos.innerHTML = "";
+
+      if (!alumnos.length) {
+        setEstado("No hay alumnos registrados en la base de datos.", "empty");
+        return;
+      }
+
+      if (!lista.length) {
+        setEstado("No hay coincidencias para la búsqueda actual.", "warn");
+        return;
+      }
+
+      setEstado(`Total de alumnos: ${lista.length}`, "ok");
+
+      lista.forEach((a, idx) => {
+        const tr = document.createElement("tr");
+
+        const tdNum = document.createElement("td");
+        tdNum.textContent = String(idx + 1);
+
+        const tdNombre = document.createElement("td");
+        tdNombre.textContent = String(a?.nombre || "Alumno");
+
+        const tdMatricula = document.createElement("td");
+        tdMatricula.textContent = String(a?.matricula || "-");
+
+        const tdGradoGrupo = document.createElement("td");
+        tdGradoGrupo.textContent = gradoGrupo(a);
+
+        const tdTipoSangre = document.createElement("td");
+        tdTipoSangre.textContent = String(a?.tipoSangre || "-");
+
+        const tdTutor = document.createElement("td");
+        tdTutor.textContent = tutorTexto(a);
+
+        const tdUID = document.createElement("td");
+        tdUID.textContent = String(a?.tarjetaUID || "-");
+
+        const tdAcciones = document.createElement("td");
+        if (modoEdicion && rolActual === "direccion") {
+          const btnEditar = document.createElement("button");
+          btnEditar.className = "btn-sec";
+          btnEditar.type = "button";
+          btnEditar.textContent = "Editar";
+          btnEditar.addEventListener("click", () => seleccionarAlumnoParaEdicion(a.id));
+          tdAcciones.appendChild(btnEditar);
+        } else {
+          tdAcciones.textContent = "-";
+        }
+
+        tr.append(tdNum, tdNombre, tdMatricula, tdGradoGrupo, tdTipoSangre, tdTutor, tdUID, tdAcciones);
+        tablaAlumnos.appendChild(tr);
+      });
+    }
+
+    function setModoEdicion(activo) {
+      if (rolActual !== "direccion") {
+        modoEdicion = false;
+        panelEdicionAlumno.style.display = "none";
+        return;
+      }
+
+      modoEdicion = !!activo;
+      btnModoEdicion.textContent = `Modo edición: ${modoEdicion ? "ON" : "OFF"}`;
+      panelEdicionAlumno.style.display = modoEdicion ? "block" : "none";
+
+      if (!modoEdicion) {
+        limpiarPanelEdicion();
+      }
+
+      renderAlumnos();
+    }
+
+    function limpiarPanelEdicion() {
+      alumnoEditandoId = null;
+      document.getElementById("edNombre").value = "";
+      document.getElementById("edCorreo").value = "";
+      document.getElementById("edFechaNacimiento").value = "";
+      document.getElementById("edTelefono").value = "";
+      document.getElementById("edMatricula").value = "";
+      document.getElementById("edGrado").value = "";
+      document.getElementById("edGrupo").value = "";
+      document.getElementById("edTarjetaUID").value = "";
+      document.getElementById("edTipoSangre").value = "";
+      document.getElementById("edTutorNombre").value = "";
+      document.getElementById("edTutorParentesco").value = "";
+      document.getElementById("edTutorTelefono").value = "";
+      document.getElementById("edTutorCorreo").value = "";
+      document.getElementById("edAlergias").value = "";
+      setEstadoEdicion("Selecciona un alumno y actualiza sus datos.", "info");
+    }
+
+    function seleccionarAlumnoParaEdicion(id) {
+      const alumno = getAlumnoById(id);
+      if (!alumno) return;
+
+      alumnoEditandoId = alumno.id;
+      document.getElementById("edNombre").value = alumno.nombre || "";
+      document.getElementById("edCorreo").value = alumno.correo || "";
+      document.getElementById("edFechaNacimiento").value = alumno.fechaNacimiento || "";
+      document.getElementById("edTelefono").value = alumno.telefono || "";
+      document.getElementById("edMatricula").value = alumno.matricula || "";
+      document.getElementById("edGrado").value = alumno.grado || "";
+      document.getElementById("edGrupo").value = alumno.grupo || "";
+      document.getElementById("edTarjetaUID").value = alumno.tarjetaUID || "";
+      document.getElementById("edTipoSangre").value = alumno.tipoSangre || "";
+      document.getElementById("edTutorNombre").value = alumno.tutorNombre || "";
+      document.getElementById("edTutorParentesco").value = alumno.tutorParentesco || "";
+      document.getElementById("edTutorTelefono").value = alumno.tutorTelefono || "";
+      document.getElementById("edTutorCorreo").value = alumno.tutorCorreo || "";
+      document.getElementById("edAlergias").value = alumno.alergias || "";
+      setEstadoEdicion(`Editando: ${alumno.nombre || "Alumno"}`, "ok");
+      panelEdicionAlumno.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function construirAlumnoEditado() {
+      return {
+        id: String(alumnoEditandoId || "").trim(),
+        nombre: document.getElementById("edNombre").value.trim(),
+        correo: document.getElementById("edCorreo").value.trim().toLowerCase(),
+        fechaNacimiento: document.getElementById("edFechaNacimiento").value,
+        telefono: document.getElementById("edTelefono").value.trim(),
+        matricula: normalizarMatricula(document.getElementById("edMatricula").value),
+        grado: String(document.getElementById("edGrado").value || "").trim().toUpperCase(),
+        grupo: String(document.getElementById("edGrupo").value || "").trim().toUpperCase(),
+        tarjetaUID: normalizarUIDLocal(document.getElementById("edTarjetaUID").value),
+        tipoSangre: normalizarTipoSangre(document.getElementById("edTipoSangre").value),
+        tutorNombre: document.getElementById("edTutorNombre").value.trim(),
+        tutorParentesco: normalizarParentescoTutor(document.getElementById("edTutorParentesco").value),
+        tutorTelefono: document.getElementById("edTutorTelefono").value.trim(),
+        tutorCorreo: document.getElementById("edTutorCorreo").value.trim().toLowerCase(),
+        alergias: document.getElementById("edAlergias").value.trim()
+      };
+    }
+
+    function validarAlumnoEditado(alumno) {
+      if (!alumno.id) return "Selecciona un alumno para editar";
+      if (!alumno.nombre || !alumno.correo || !alumno.fechaNacimiento || !alumno.telefono || !alumno.matricula || !alumno.grado || !alumno.grupo) {
+        return "Completa todos los datos principales del alumno";
+      }
+      if (!validarCorreo(alumno.correo)) {
+        return "Correo del alumno inválido";
+      }
+      if (!alumno.tipoSangre) {
+        return "Selecciona un tipo de sangre válido";
+      }
+      if (!alumno.tutorNombre || !alumno.tutorParentesco || !alumno.tutorTelefono || !alumno.tutorCorreo) {
+        return "Completa todos los datos del tutor";
+      }
+      if (!validarCorreo(alumno.tutorCorreo)) {
+        return "Correo del tutor inválido";
+      }
+      return null;
+    }
+
+    async function guardarEdicionAlumno() {
+      if (rolActual !== "direccion") return;
+
+      const editado = construirAlumnoEditado();
+      const error = validarAlumnoEditado(editado);
+      if (error) {
+        setEstadoEdicion(error, "error");
+        return;
+      }
+
+      const idx = alumnos.findIndex(a => String(a.id) === String(editado.id));
+      if (idx < 0) {
+        setEstadoEdicion("No se encontró el alumno seleccionado.", "error");
+        return;
+      }
+
+      const merged = {
+        ...alumnos[idx],
+        ...editado
+      };
+      alumnos[idx] = merged;
+
+      if (typeof guardarAlumnos === "function") {
+        guardarAlumnos(alumnos);
+      } else {
+        safeSet("alumnos", alumnos);
+      }
+
+      const bc = typeof createAppBroadcastChannel === "function"
+        ? createAppBroadcastChannel("victory-data")
+        : new BroadcastChannel("victory-data");
+      bc.postMessage("alumnos");
+
+      if (typeof actualizarAlumnoSupabase === "function") {
+        const ok = await actualizarAlumnoSupabase(merged);
+        if (!ok) {
+          setEstadoEdicion("Se guardó localmente, pero falló la actualización remota.", "warn");
+        } else {
+          setEstadoEdicion("Alumno actualizado correctamente.", "ok");
+        }
+      } else {
+        setEstadoEdicion("Alumno actualizado localmente.", "warn");
+      }
+
+      alumnos = cargarAlumnosLocalOrdenados();
+      renderAlumnos();
+    }
+
+    async function recargarAlumnos() {
+      if (typeof ensureAlumnosCargados === "function") {
+        await ensureAlumnosCargados();
+      }
+
+      alumnos = cargarAlumnosLocalOrdenados();
+      renderAlumnos();
+    }
+
+    function iniciarSync() {
+      const canal = typeof createAppBroadcastChannel === "function"
+        ? createAppBroadcastChannel("victory-data")
+        : new BroadcastChannel("victory-data");
+
+      canal.onmessage = async e => {
+        if (e.data === "alumnos") {
+          await recargarAlumnos();
+        }
+      };
+
+      window.addEventListener("storage", async e => {
+        const keyOk = typeof isAppStorageKeyMatch === "function"
+          ? isAppStorageKeyMatch(e.key, "alumnos")
+          : (e.key === "alumnos");
+
+        if (keyOk) {
+          await recargarAlumnos();
+        }
+      });
+    }
+
+    function initAccionesEdicion() {
+      if (rolActual === "direccion") {
+        btnModoEdicion?.addEventListener("click", () => setModoEdicion(!modoEdicion));
+        btnGuardarEdicion?.addEventListener("click", guardarEdicionAlumno);
+        btnCancelarEdicion?.addEventListener("click", limpiarPanelEdicion);
+      }
+    }
+
+    async function initAlumnos() {
+      rolActual = typeof getAuthRole === "function" ? getAuthRole() : "";
+      setEstado("Cargando alumnos...", "loading");
+      busquedaAlumnos.addEventListener("input", renderAlumnos);
+      initAccionesEdicion();
+      await recargarAlumnos();
+      iniciarSync();
+    }
+  </script>
+</body>
+</html>
+

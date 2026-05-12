@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Sistema de Asistencia Escolar</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card">
+      <img src="img/logo.png" alt="Logo CECyTE" class="login-logo">
+      <h1>Sistema de Asistencia Escolar</h1>
+      <p class="login-sub">Inicia sesión. El acceso se solicita una vez por día.</p>
+
+      <form id="formLogin" class="login-form" autocomplete="off">
+        <label>
+          Usuario
+          <input id="username" type="text" placeholder="usuario institucional" required>
+        </label>
+
+        <label>
+          Contraseña
+          <input id="password" type="password" placeholder="********" required>
+        </label>
+
+        <button type="submit" id="btnLogin" class="btn-login">Iniciar sesión</button>
+      </form>
+
+      <div class="login-alt-actions">
+        <a class="btn-plantilla" href="registro_usuario.html">Registrar usuario</a>
+      </div>
+
+      <p id="loginMsg" class="login-msg">Ingresa tus credenciales para continuar.</p>
+    </section>
+  </main>
+
+  <script src="js/storage.js?v=20260310b"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script>
+    const form = document.getElementById("formLogin");
+    const msg = document.getElementById("loginMsg");
+    const btn = document.getElementById("btnLogin");
+
+    const params = new URLSearchParams(location.search);
+    const next = params.get("next") || "index.html";
+
+    function setMsg(texto, tipo = "info") {
+      msg.textContent = texto;
+      msg.className = `login-msg ${tipo}`;
+    }
+
+    window.addEventListener("load", () => {
+      if (typeof isAuthSessionActiveToday === "function" && isAuthSessionActiveToday()) {
+        location.href = next;
+      }
+    });
+
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+
+      const username = document.getElementById("username").value.trim().toLowerCase();
+      const password = document.getElementById("password").value;
+
+      if (!username || !password) {
+        setMsg("Completa usuario y contraseña.", "error");
+        return;
+      }
+
+      btn.disabled = true;
+      setMsg("Validando credenciales...", "info");
+
+      try {
+        if (typeof appAuthLogin !== "function") {
+          throw new Error("Modulo de autenticacion no disponible");
+        }
+
+        const out = await appAuthLogin({ username, password });
+        if (!out?.ok || !out?.user?.id) {
+          setMsg(out?.message || "Usuario o contraseña inválidos.", "error");
+          return;
+        }
+
+        const token = typeof getAuthToken === "function" ? getAuthToken() : (window.SUPABASE_ANON_KEY || "");
+        setAuthSession(token, out.user, { markDay: true });
+
+        setMsg(`Bienvenido ${out.user.nombre}. Redirigiendo...`, "ok");
+        setTimeout(() => {
+          location.href = next;
+        }, 500);
+      } catch (err) {
+        console.error(err);
+        setMsg(err?.message || "No se pudo iniciar sesión.", "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+

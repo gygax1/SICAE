@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Usuario | Sistema de Asistencia Escolar</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="login-page">
+  <main class="login-shell wide">
+    <section class="login-card">
+      <img src="img/logo.png" alt="Logo CECyTE" class="login-logo">
+      <h1>Registro de usuario</h1>
+      <p class="login-sub">Alta de cuentas para roles docente o dirección.</p>
+
+      <form id="formRegistroUsuario" class="login-form" autocomplete="off">
+        <label>
+          Tipo de usuario
+          <select id="rol" required>
+            <option value="docente">Docente</option>
+            <option value="direccion">Dirección</option>
+          </select>
+        </label>
+
+        <label>
+          Nombre completo
+          <input id="nombreCompleto" type="text" required>
+        </label>
+
+        <label>
+          Teléfono
+          <input id="telefono" type="tel" required>
+        </label>
+
+        <label>
+          Correo
+          <input id="correo" type="email" required>
+        </label>
+
+        <label>
+          CURP
+          <input id="curp" type="text" maxlength="18" required>
+        </label>
+
+        <label>
+          Año de nacimiento
+          <input id="anioNacimiento" type="number" min="1900" max="2100" required>
+        </label>
+
+        <label>
+          Sexo
+          <select id="sexo" required>
+            <option value="">Selecciona</option>
+            <option value="M">Masculino</option>
+            <option value="F">Femenino</option>
+            <option value="X">Prefiero no decir</option>
+          </select>
+        </label>
+
+        <label>
+          Usuario
+          <input id="username" type="text" required>
+        </label>
+
+        <label>
+          Contraseña
+          <input id="password" type="password" minlength="6" required>
+        </label>
+
+        <label>
+          Contraseña maestra
+          <input id="masterPassword" type="password" required>
+        </label>
+
+        <button type="submit" id="btnRegistrarUsuario" class="btn-login">Registrar usuario</button>
+      </form>
+
+      <div class="login-alt-actions">
+        <a class="btn-plantilla" href="login.html">Volver a login</a>
+      </div>
+
+      <p id="registroMsg" class="login-msg">La contraseña maestra es obligatoria para registrar cualquier usuario.</p>
+    </section>
+  </main>
+
+  <script src="js/storage.js?v=20260310b"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script>
+    const form = document.getElementById("formRegistroUsuario");
+    const msg = document.getElementById("registroMsg");
+    const btn = document.getElementById("btnRegistrarUsuario");
+
+    function setMsg(texto, tipo = "info") {
+      msg.textContent = texto;
+      msg.className = `login-msg ${tipo}`;
+    }
+
+    function validarCurp(curp) {
+      return /^[A-Z]{4}[0-9]{6}[A-Z0-9]{8}$/.test(curp);
+    }
+
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+
+      const rol = document.getElementById("rol").value.trim().toLowerCase();
+      const nombreCompleto = document.getElementById("nombreCompleto").value.trim();
+      const telefono = document.getElementById("telefono").value.trim();
+      const correo = document.getElementById("correo").value.trim().toLowerCase();
+      const curp = document.getElementById("curp").value.trim().toUpperCase();
+      const anioNacimiento = Number(document.getElementById("anioNacimiento").value);
+      const sexo = document.getElementById("sexo").value.trim().toUpperCase();
+      const username = document.getElementById("username").value.trim().toLowerCase();
+      const password = document.getElementById("password").value;
+      const masterPassword = document.getElementById("masterPassword").value;
+
+      if (!rol || !nombreCompleto || !telefono || !correo || !curp || !anioNacimiento || !sexo || !username || !password || !masterPassword) {
+        setMsg("Completa todos los campos", "error");
+        return;
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
+        setMsg("Correo inválido.", "error");
+        return;
+      }
+
+      if (!validarCurp(curp)) {
+        setMsg("CURP inválida (debe tener 18 caracteres válidos).", "error");
+        return;
+      }
+
+      const anioActual = Number(new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" }).slice(0, 4));
+      if (!Number.isFinite(anioNacimiento) || anioNacimiento < 1900 || anioNacimiento > anioActual) {
+        setMsg("Año de nacimiento inválido.", "error");
+        return;
+      }
+
+      if (password.length < 6) {
+        setMsg("La contraseña debe tener al menos 6 caracteres.", "error");
+        return;
+      }
+
+      btn.disabled = true;
+      setMsg("Registrando usuario...", "info");
+
+      try {
+        if (typeof appAuthRegisterUser !== "function") {
+          throw new Error("Modulo de autenticacion no disponible");
+        }
+
+        const out = await appAuthRegisterUser({
+          rol,
+          nombre_completo: nombreCompleto,
+          telefono,
+          correo,
+          curp,
+          anio_nacimiento: anioNacimiento,
+          sexo,
+          username,
+          password,
+          master_password: masterPassword
+        });
+
+        if (!out?.ok) {
+          setMsg(out?.message || "No se pudo registrar el usuario", "error");
+          return;
+        }
+
+        setMsg("Usuario registrado correctamente. Redirigiendo a login...", "ok");
+        setTimeout(() => {
+          location.href = "login.html";
+        }, 900);
+      } catch (err) {
+        console.error(err);
+        setMsg(err?.message || "No se pudo registrar el usuario", "error");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+
+

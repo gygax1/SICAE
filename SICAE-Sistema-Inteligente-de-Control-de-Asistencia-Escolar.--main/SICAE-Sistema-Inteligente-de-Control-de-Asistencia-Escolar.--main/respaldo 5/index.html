@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Asistencia Escolar</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body data-requires-auth="true">
+  <header class="header-brand">
+    <div class="brand">
+      <img src="img/logo.png" alt="Control Escolar">
+      <div>
+        <h2>Asistencias del día</h2>
+        <p class="brand-sub">Sistema de Asistencia Escolar</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="session-pill" data-auth-user>Sin sesión</span>
+      <button class="btn-sec" data-auth-logout>Salir</button>
+    </div>
+  </header>
+
+  <section class="dashboard-grid">
+    <article class="stat-card">
+      <h3>Total alumnos</h3>
+      <p id="dashTotalAlumnos">0</p>
+    </article>
+    <article class="stat-card is-green">
+      <h3>Presentes</h3>
+      <p id="dashPresentes">0</p>
+    </article>
+    <article class="stat-card is-orange">
+      <h3>Entradas hoy</h3>
+      <p id="dashEntradas">0</p>
+    </article>
+    <article class="stat-card">
+      <h3>Salidas hoy</h3>
+      <p id="dashSalidas">0</p>
+    </article>
+  </section>
+
+  <div class="estado-sistema">
+    <span id="contadorAforo" class="contador">Dentro: <strong>0</strong></span>
+    <span id="estadoLector" class="lector off">Lector inactivo</span>
+    <span id="estadoConexion" class="lector off">Offline</span>
+  </div>
+
+  <div class="panel-acciones">
+    <button class="destacado" data-role-allow="direccion" data-role-hide-if-denied="true" onclick="location.href='registro.html'">Registrar alumno</button>
+    <button onclick="location.href='alumnos.html'">Alumnos</button>
+    <button onclick="location.href='horarios.html'">Horarios y mapeo</button>
+    <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="location.href='registro.html#importacionExcel'">Carga masiva Excel</button>
+    <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="location.href='historial.html'">Historial</button>
+    <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="descargarReporte('asistencias')">Exportar asistencias CSV</button>
+    <button data-role-allow="direccion" data-role-hide-if-denied="true" onclick="descargarReporte('diario')">Exportar resumen diario</button>
+  </div>
+
+  <p class="leyenda">Pase la tarjeta del alumno para registrar entrada o salida automáticamente.</p>
+  <p id="estadoFiltroDocente" class="screen-status info estado-horario-docente" style="display:none;"></p>
+
+  <div id="contenedorTabla" class="table-shell" style="max-height:68vh;">
+    <p id="estadoTabla" class="table-status loading">Cargando asistencias...</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Alumno</th>
+          <th>Matrícula</th>
+          <th>Grado / Grupo</th>
+          <th>Entrada</th>
+          <th>Salida</th>
+        </tr>
+      </thead>
+      <tbody id="tablaAsistencias"></tbody>
+    </table>
+  </div>
+
+  <div class="confirmacion" id="confirmacion">
+    <div class="box">
+      <h1 id="tituloConfirmacion"></h1>
+      <p id="mensajeConfirmacion"></p>
+    </div>
+  </div>
+
+  <script src="js/storage.js?v=20260310a"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/horarios.js?v=20260312a"></script>
+  <script src="js/asistencias.js?v=20260312a"></script>
+  <script src="js/realtime.js?v=20260312a"></script>
+  <script src="js/nfc.js?v=20260310a"></script>
+
+  <script>
+    let ultimoUIDLeido = null;
+    let ultimoTSLeido = 0;
+    const COOLDOWN_LECTURA_MS = 3000;
+    const HEARTBEAT_STALE_MS = 20000;
+
+    let estadoCanalNFC = "INIT";
+    let ultimoHeartbeatLector = 0;
+    let monitorHeartbeatId = null;
+    const alumnosEnProceso = new Set();
+    const eventosAnimados = new Map();
+    const EVENTO_ANIM_TTL_MS = 1000 * 60 * 15;
+    let filtroHorarioDocenteActivo = false;
+    let gruposPermitidosHorarioDocente = new Set();
+    let mensajeVacioHorarioDocente = "";
+    let monitorHorarioDocenteId = null;
+
+    window.addEventListener("load", async () => {
+      const estadoLector = document.getElementById("estadoLector");
+      const estadoConexion = document.getElementById("estadoConexion");
+
+      actualizarEstadoConexion(estadoConexion);
+      window.addEventListener("online", () => actualizarEstadoConexion(estadoConexion));
+      window.addEventListener("offline", () => actualizarEstadoConexion(estadoConexion));
+
+      if (typeof iniciarSyncHorariosRemoto === "function") {
+        iniciarSyncHorariosRemoto({
+          intervalMs: 10000,
+          prefer: "newer"
+        });
+      }
+
+      if (typeof horarioSincronizarAhora === "function") {
+        await horarioSincronizarAhora({ prefer: "newer" });
+      }
+
+      if (typeof ensureAlumnosCargados === "function") {
+        await ensureAlumnosCargados();
+      }
+
+      renderTablaConEstado();
+      actualizarContador();
+      await actualizarDashboard();
+      await refrescarFiltroHorarioDocente({ forceRender: true });
+
+      iniciarLecturaNFCIndex(estadoLector);
+      iniciarMonitorHeartbeat(estadoLector);
+
+      setInterval(() => {
+        actualizarDashboard();
+      }, 8000);
+
+      if (monitorHorarioDocenteId) clearInterval(monitorHorarioDocenteId);
+      monitorHorarioDocenteId = setInterval(() => {
+        refrescarFiltroHorarioDocente({ forceRender: false });
+      }, 15000);
+    });
+
+    function setEstadoTabla(msg, tipo = "loading") {
+      const el = document.getElementById("estadoTabla");
+      if (!el) return;
+
+      el.textContent = msg || "";
+      el.className = `table-status ${tipo}`;
+      el.style.display = msg ? "block" : "none";
+    }
+
+    function grupoKeyRegistro(a = {}) {
+      const grado = String(a?.grado || "").trim().toUpperCase();
+      const grupo = String(a?.grupo || "").trim().toUpperCase();
+      return `${grado}|${grupo}`;
+    }
+
+    function setEstadoFiltroDocente(msg = "", tipo = "info") {
+      const el = document.getElementById("estadoFiltroDocente");
+      if (!el) return;
+
+      if (!msg) {
+        el.textContent = "";
+        el.style.display = "none";
+        return;
+      }
+
+      el.textContent = msg;
+      el.className = `screen-status ${tipo} estado-horario-docente`;
+      el.style.display = "block";
+    }
+
+    window.filtroAsistenciaHorarioDocente = registro => {
+      if (!filtroHorarioDocenteActivo) return true;
+      if (!gruposPermitidosHorarioDocente.size) return false;
+      const key = grupoKeyRegistro(registro);
+      return gruposPermitidosHorarioDocente.has(key);
+    };
+
+    async function refrescarFiltroHorarioDocente({ forceRender = false } = {}) {
+      const role = typeof getAuthRole === "function" ? getAuthRole() : "";
+      if (role !== "docente") {
+        filtroHorarioDocenteActivo = false;
+        gruposPermitidosHorarioDocente = new Set();
+        mensajeVacioHorarioDocente = "";
+        setEstadoFiltroDocente("");
+        if (forceRender) {
+          renderTablaConEstado();
+          actualizarContador();
+        }
+        return;
+      }
+
+      if (typeof horarioObtenerClasesActualesDocente !== "function") {
+        filtroHorarioDocenteActivo = false;
+        gruposPermitidosHorarioDocente = new Set();
+        mensajeVacioHorarioDocente = "";
+        setEstadoFiltroDocente("Horario no disponible en este dispositivo.", "warn");
+        if (forceRender) {
+          renderTablaConEstado();
+          actualizarContador();
+        }
+        return;
+      }
+
+      const user = typeof getAuthUser === "function" ? getAuthUser() : {};
+      const clases = horarioObtenerClasesActualesDocente({
+        id: user?.id,
+        username: user?.username,
+        nombre: user?.nombre
+      }, new Date());
+
+      filtroHorarioDocenteActivo = true;
+
+      const grupos = new Set(
+        (Array.isArray(clases) ? clases : [])
+          .map(c => String(c?.grupo_key || "").trim().toUpperCase())
+          .filter(Boolean)
+      );
+
+      gruposPermitidosHorarioDocente = grupos;
+
+      if (!grupos.size) {
+        mensajeVacioHorarioDocente = "Sin clase activa en este bloque horario para tu docente.";
+        setEstadoFiltroDocente(mensajeVacioHorarioDocente, "warn");
+      } else {
+        mensajeVacioHorarioDocente = "No hay asistencias para tu bloque actual.";
+        const resumen = Array.from(grupos).map(g => String(g || "").replace("|", " ")).join(", ");
+        setEstadoFiltroDocente(`Mostrando solo grupos de tu bloque actual: ${resumen}`, "ok");
+      }
+
+      renderTablaConEstado();
+      actualizarContador();
+    }
+
+    function renderTablaConEstado() {
+      cargarAsistencias();
+      const filas = document.querySelectorAll("#tablaAsistencias tr");
+      if (!filas.length) {
+        const msg = (filtroHorarioDocenteActivo && mensajeVacioHorarioDocente)
+          ? mensajeVacioHorarioDocente
+          : "Sin asistencias registradas hoy.";
+        setEstadoTabla(msg, "empty");
+      } else {
+        setEstadoTabla("", "ok");
+      }
+    }
+
+    function actualizarEstadoConexion(el) {
+      if (!el) return;
+      if (navigator.onLine) {
+        el.textContent = "Online";
+        el.className = "lector on";
+        return;
+      }
+      el.textContent = "Offline";
+      el.className = "lector off";
+    }
+
+    function setEstadoLector(el, modo, texto) {
+      if (!el) return;
+      el.className = `lector ${modo}`;
+      el.textContent = texto;
+    }
+
+    function actualizarEstadoCanal(estadoLector, status) {
+      const s = String(status || "").toUpperCase();
+      estadoCanalNFC = s;
+
+      if (s === "SUBSCRIBED") {
+        ultimoHeartbeatLector = Date.now();
+        setEstadoLector(estadoLector, "on", "Lector activo");
+        return;
+      }
+
+      if (s === "RECONNECTING") {
+        setEstadoLector(estadoLector, "warn", "Reconectando lector");
+        return;
+      }
+
+      if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED", "ERROR_NO_SUPABASE", "ERROR_NO_API"].includes(s)) {
+        setEstadoLector(estadoLector, "off", "Lector sin señal");
+      }
+    }
+
+    function marcarHeartbeatLector(estadoLector, detalle = "") {
+      ultimoHeartbeatLector = Date.now();
+      if (estadoCanalNFC !== "SUBSCRIBED") return;
+      const sufijo = detalle ? ` (${detalle})` : "";
+      setEstadoLector(estadoLector, "on", `Lector activo${sufijo}`);
+    }
+
+    function iniciarMonitorHeartbeat(estadoLector) {
+      if (monitorHeartbeatId) clearInterval(monitorHeartbeatId);
+
+      monitorHeartbeatId = setInterval(() => {
+        if (!estadoLector || estadoCanalNFC !== "SUBSCRIBED") return;
+
+        const delta = Date.now() - ultimoHeartbeatLector;
+        if (!ultimoHeartbeatLector || delta > HEARTBEAT_STALE_MS) {
+          setEstadoLector(estadoLector, "warn", "Activo sin lecturas recientes");
+        }
+      }, 3000);
+    }
+
+    async function actualizarDashboard() {
+      if (typeof obtenerResumenDashboardRemoto !== "function") return;
+
+      try {
+        const data = await obtenerResumenDashboardRemoto();
+        if (!data) return;
+
+        document.getElementById("dashTotalAlumnos").textContent = data.total_alumnos ?? 0;
+        document.getElementById("dashPresentes").textContent = data.presentes ?? 0;
+        document.getElementById("dashEntradas").textContent = data.entradas_hoy ?? 0;
+        document.getElementById("dashSalidas").textContent = data.salidas_hoy ?? 0;
+      } catch (err) {
+        console.warn("[DASHBOARD] Error:", err?.message || err);
+      }
+    }
+
+    async function descargarReporte(tipo) {
+      try {
+        if (tipo === "asistencias" && typeof descargarReporteAsistenciasCsv === "function") {
+          await descargarReporteAsistenciasCsv();
+          return;
+        }
+
+        if (tipo === "diario" && typeof descargarReporteDiarioCsv === "function") {
+          await descargarReporteDiarioCsv();
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+        mostrarConfirmacion("error", "Error de reporte", "No se pudo descargar el archivo CSV");
+      }
+    }
+
+    function mostrarConfirmacion(tipo, titulo, mensaje) {
+      const box = document.getElementById("confirmacion");
+      document.getElementById("tituloConfirmacion").textContent = titulo;
+      document.getElementById("mensajeConfirmacion").textContent = mensaje;
+      box.className = `confirmacion ${tipo}`;
+      box.style.display = "flex";
+
+      setTimeout(() => {
+        box.style.display = "none";
+      }, 2200);
+    }
+
+    function claveEventoAnimado(ev = {}) {
+      const id = String(ev?.event_id || ev?.id || "").trim();
+      if (id) return `id:${id}`;
+
+      const alumnoId = String(ev?.alumno_id || ev?.cliente_id || "").trim();
+      const uid = normalizarUID(ev?.uid || "");
+      const tipo = String(ev?.accion || ev?.type || "").trim().toLowerCase();
+      const createdAt = String(ev?.created_at || "").trim();
+      if (!tipo || (!alumnoId && !uid)) return "";
+      return `sig:${alumnoId}|${uid}|${tipo}|${createdAt}`;
+    }
+
+    function limpiarEventosAnimados() {
+      const nowTs = Date.now();
+      const minTs = nowTs - EVENTO_ANIM_TTL_MS;
+
+      for (const [key, ts] of eventosAnimados.entries()) {
+        if (ts < minTs) {
+          eventosAnimados.delete(key);
+        }
+      }
+
+      if (eventosAnimados.size <= 4000) return;
+
+      const entries = Array.from(eventosAnimados.entries()).sort((a, b) => a[1] - b[1]);
+      const overflow = eventosAnimados.size - 4000;
+      for (let i = 0; i < overflow; i += 1) {
+        const key = entries[i]?.[0];
+        if (key) eventosAnimados.delete(key);
+      }
+    }
+
+    function marcarEventoAnimado(ev = {}) {
+      const key = claveEventoAnimado(ev);
+      if (!key) return false;
+      limpiarEventosAnimados();
+      if (eventosAnimados.has(key)) return false;
+      eventosAnimados.set(key, Date.now());
+      return true;
+    }
+
+    async function obtenerAlumnoDesdeEvento(ev = {}) {
+      const alumnoId = String(ev?.alumno_id || "").trim();
+      if (alumnoId) {
+        const alumnos = typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos");
+        const local = (alumnos || []).find(a => String(a.id || "") === alumnoId);
+        if (local) return local;
+      }
+
+      const uid = normalizarUID(ev?.uid || "");
+      if (!uid) return null;
+      return obtenerAlumnoPorUID(uid);
+    }
+
+    function iniciarLecturaNFCIndex(estadoLector) {
+      if (!estadoLector) return;
+      setEstadoLector(estadoLector, "warn", "Conectando lector...");
+
+      if (typeof iniciarNFCControlado !== "function") return;
+
+      iniciarNFCControlado({
+        onUID: uid => {
+          marcarHeartbeatLector(estadoLector, "lectura recibida");
+          procesarTarjeta(uid);
+        },
+        onHeartbeat: evento => {
+          marcarHeartbeatLector(estadoLector, `última ${horaDesdeTS(evento?.ts || Date.now())}`);
+        },
+        onStatus: status => {
+          actualizarEstadoCanal(estadoLector, status);
+        },
+        onTimeout: () => {
+          if (estadoCanalNFC === "SUBSCRIBED") {
+            setEstadoLector(estadoLector, "warn", "Esperando tarjeta...");
+          }
+        },
+        onError: () => {
+          setEstadoLector(estadoLector, "off", "Lector con error");
+          if (typeof detenerNFC === "function") detenerNFC();
+          setTimeout(() => iniciarLecturaNFCIndex(estadoLector), 1800);
+        }
+      });
+    }
+
+    function alumnoDentroLocal(alumnoId) {
+      const asistencias = obtenerAsistencias();
+      if (!Array.isArray(asistencias)) return false;
+
+      return asistencias.some(a =>
+        a &&
+        a.fecha === hoy() &&
+        String(a.alumno_id || "") === String(alumnoId) &&
+        a.entrada_ts &&
+        !a.salida_ts
+      );
+    }
+
+    async function resolverAccionEsperada(alumnoId) {
+      const estadoLocal = alumnoDentroLocal(alumnoId) ? "dentro" : "fuera";
+
+      if (!navigator.onLine || typeof obtenerUltimoTipoAsistenciaHoyRemoto !== "function") {
+        return {
+          accionEsperada: estadoLocal === "dentro" ? "salida" : "entrada",
+          estadoActual: estadoLocal,
+          fuente: "local"
+        };
+      }
+
+      const ultimoTipo = await obtenerUltimoTipoAsistenciaHoyRemoto(alumnoId);
+      if (!ultimoTipo) {
+        return {
+          accionEsperada: estadoLocal === "dentro" ? "salida" : "entrada",
+          estadoActual: estadoLocal,
+          fuente: "local"
+        };
+      }
+
+      const estadoRemoto = ultimoTipo === "entrada" ? "dentro" : "fuera";
+      return {
+        accionEsperada: estadoRemoto === "dentro" ? "salida" : "entrada",
+        estadoActual: estadoRemoto,
+        ultimoTipo,
+        fuente: "remoto"
+      };
+    }
+
+    async function registrarAsistenciaConControl({ alumnoId, uid, accion = null }) {
+      if (typeof registrarAsistenciaServidor !== "function") {
+        throw new Error("registrarAsistenciaServidor no disponible");
+      }
+
+      let accionSugerida = String(accion || "").trim().toLowerCase();
+      if (accionSugerida !== "entrada" && accionSugerida !== "salida") {
+        const control = await resolverAccionEsperada(alumnoId);
+        accionSugerida = String(control?.accionEsperada || "entrada").toLowerCase();
+      }
+
+      const payload = {
+        id: crypto.randomUUID(),
+        alumno_id: alumnoId,
+        uid,
+        created_at: new Date().toISOString(),
+        type: accionSugerida,
+        source: "wifi",
+        device_id: "pc_control_escolar"
+      };
+
+      return registrarAsistenciaServidor(payload);
+    }
+
+    function obtenerAlumnoLocalPorUID(uid) {
+      const alumnos = typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos");
+      return alumnos.find(a => normalizarUID(a?.tarjetaUID || a?.tarjeta_uid) === uid) || null;
+    }
+
+    async function obtenerAlumnoPorUID(uid) {
+      const local = obtenerAlumnoLocalPorUID(uid);
+      if (local) return local;
+
+      if (typeof obtenerAlumnoPorUIDRemoto === "function") {
+        const remoto = await obtenerAlumnoPorUIDRemoto(uid);
+        if (remoto) return remoto;
+      }
+
+      return null;
+    }
+
+    async function procesarTarjeta(uid) {
+      uid = normalizarUID(uid);
+      const ahoraMs = Date.now();
+
+      if (uid === ultimoUIDLeido && (ahoraMs - ultimoTSLeido) < COOLDOWN_LECTURA_MS) {
+        return;
+      }
+
+      ultimoUIDLeido = uid;
+      ultimoTSLeido = ahoraMs;
+      let alumnoIdProcesado = null;
+
+      try {
+        const alumno = await obtenerAlumnoPorUID(uid);
+
+        if (!alumno || !alumno.id) {
+          mostrarConfirmacion("error", "Tarjeta no registrada", "Registre al alumno primero");
+          return;
+        }
+
+        if (filtroHorarioDocenteActivo) {
+          const keyGrupoAlumno = `${String(alumno?.grado || "").trim().toUpperCase()}|${String(alumno?.grupo || "").trim().toUpperCase()}`;
+
+          if (!gruposPermitidosHorarioDocente.size) {
+            mostrarConfirmacion("error", "Sin bloque activo", "Este docente no tiene clase asignada en este horario");
+            return;
+          }
+
+          if (!gruposPermitidosHorarioDocente.has(keyGrupoAlumno)) {
+            mostrarConfirmacion("error", "Fuera de horario", "El alumno no corresponde al grupo de este bloque");
+            return;
+          }
+        }
+
+        if (alumnosEnProceso.has(alumno.id)) {
+          return;
+        }
+
+        alumnoIdProcesado = alumno.id;
+        alumnosEnProceso.add(alumno.id);
+
+        const resultado = await registrarAsistenciaConControl({
+          alumnoId: alumno.id,
+          uid
+        });
+
+        const accionReal = String(resultado?.accion || "").toLowerCase();
+        if (accionReal !== "entrada" && accionReal !== "salida") {
+          throw new Error("accion_asistencia_invalida");
+        }
+
+        marcarEventoAnimado({
+          id: resultado?.event_id || resultado?.id,
+          alumno_id: alumno.id,
+          uid,
+          type: accionReal,
+          created_at: resultado?.created_at
+        });
+
+        if (typeof marcarEventoAttendanceComoVisto === "function") {
+          marcarEventoAttendanceComoVisto({
+            id: resultado?.event_id || resultado?.id,
+            alumno_id: alumno.id,
+            uid,
+            type: accionReal,
+            created_at: resultado?.created_at
+          });
+        }
+
+        if (accionReal === "entrada") {
+          mostrarConfirmacion("entrada", "Entrada registrada", alumno.nombre || "Alumno");
+        } else {
+          mostrarConfirmacion("salida", "Salida registrada", alumno.nombre || "Alumno");
+        }
+
+        if (typeof reconstruirAsistenciasHoy === "function") {
+          await reconstruirAsistenciasHoy();
+        }
+
+        renderTablaConEstado();
+        actualizarContador();
+        await actualizarDashboard();
+      } catch (err) {
+        console.error("[INDEX] Error procesando tarjeta:", err);
+        mostrarConfirmacion("error", "Error de lectura", "Intente nuevamente");
+      } finally {
+        if (alumnoIdProcesado) {
+          alumnosEnProceso.delete(alumnoIdProcesado);
+        }
+      }
+    }
+
+    window.onAttendanceEventRemoto = async ev => {
+      const tipo = String(ev?.type || ev?.accion || "").toLowerCase();
+      if (tipo !== "entrada" && tipo !== "salida") return;
+      if (!marcarEventoAnimado(ev)) return;
+
+      const alumno = (ev?.alumno && typeof ev.alumno === "object")
+        ? ev.alumno
+        : await obtenerAlumnoDesdeEvento(ev);
+      const nombre = String(alumno?.nombre || "Alumno").trim() || "Alumno";
+      const keyGrupoEvento = `${String(alumno?.grado || ev?.grado || "").trim().toUpperCase()}|${String(alumno?.grupo || ev?.grupo || "").trim().toUpperCase()}`;
+
+      if (filtroHorarioDocenteActivo) {
+        if (!gruposPermitidosHorarioDocente.size || !gruposPermitidosHorarioDocente.has(keyGrupoEvento)) {
+          return;
+        }
+      }
+
+      if (tipo === "entrada") {
+        mostrarConfirmacion("entrada", "Entrada registrada", nombre);
+      } else {
+        mostrarConfirmacion("salida", "Salida registrada", nombre);
+      }
+
+      renderTablaConEstado();
+      actualizarContador();
+      await actualizarDashboard();
+    };
+
+    const canal = typeof createAppBroadcastChannel === "function"
+      ? createAppBroadcastChannel("victory-data")
+      : new BroadcastChannel("victory-data");
+    canal.onmessage = async e => {
+      if (e.data === "asistencias") {
+        renderTablaConEstado();
+        actualizarContador();
+        await actualizarDashboard();
+      }
+    };
+
+    window.addEventListener("storage", async e => {
+      const keyOk = typeof isAppStorageKeyMatch === "function"
+        ? isAppStorageKeyMatch(e.key, "asistencias")
+        : (e.key === "asistencias");
+      if (keyOk) {
+        renderTablaConEstado();
+        actualizarContador();
+        await actualizarDashboard();
+      }
+    });
+
+    window.addEventListener("horarios:changed", async () => {
+      await refrescarFiltroHorarioDocente({ forceRender: true });
+    });
+  </script>
+</body>
+</html>
+

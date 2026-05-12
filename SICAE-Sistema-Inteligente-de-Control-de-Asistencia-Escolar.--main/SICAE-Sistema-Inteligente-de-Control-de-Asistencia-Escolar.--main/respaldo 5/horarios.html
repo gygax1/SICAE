@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Horarios | Sistema de Asistencia Escolar</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body data-requires-auth="true">
+  <header class="header-brand">
+    <div class="brand">
+      <img src="img/logo.png" alt="Control Escolar">
+      <div>
+        <h2>Horarios por mapeo</h2>
+        <p class="brand-sub">Docente, grupo, salón y lector por bloque</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="session-pill" data-auth-user>Sin sesión</span>
+      <button class="btn-sec" onclick="location.href='index.html'">Volver</button>
+      <button class="btn-sec" data-auth-logout>Salir</button>
+    </div>
+  </header>
+
+  <section class="registro-shell horarios-shell">
+    <h3>Mapa semanal de clases</h3>
+    <p id="estadoHorarios" class="screen-status info">Configura el mapa por grupo y consulta por docente.</p>
+
+    <div class="horarios-toolbar">
+      <label>
+        Vista
+        <select id="selectModoVista">
+          <option value="grupo">Por grupo (edición)</option>
+          <option value="docente">Por docente (consulta)</option>
+        </select>
+      </label>
+
+      <label id="wrapGrupoHorario">
+        Grupo
+        <select id="selectGrupoHorario"></select>
+      </label>
+
+      <label id="wrapDocenteHorario" style="display:none;">
+        Docente
+        <select id="selectDocenteHorario"></select>
+      </label>
+    </div>
+
+    <div class="horarios-catalogos">
+      <article class="catalog-card">
+        <h4>Grupos</h4>
+        <div class="catalog-form">
+          <input id="inGrado" placeholder="Grado (ej: 6)">
+          <input id="inGrupo" placeholder="Grupo (ej: D)">
+          <button id="btnAddGrupo" class="btn-sec" type="button" data-role-allow="direccion">Agregar grupo</button>
+        </div>
+        <div id="listaGrupos" class="chip-list"></div>
+      </article>
+
+      <article class="catalog-card">
+        <h4>Docentes</h4>
+        <div class="catalog-form">
+          <input id="inDocenteNombre" placeholder="Nombre docente">
+          <input id="inDocenteUsuario" placeholder="Usuario docente">
+          <button id="btnAddDocente" class="btn-sec" type="button" data-role-allow="direccion">Agregar docente</button>
+        </div>
+        <div id="listaDocentes" class="chip-list"></div>
+      </article>
+
+      <article class="catalog-card">
+        <h4>Salones y lectores</h4>
+        <div class="catalog-form">
+          <input id="inSalonNombre" placeholder="Salón (ej: LAB-1)">
+          <input id="inSalonLector" placeholder="Lector (device_id)">
+          <button id="btnAddSalon" class="btn-sec" type="button" data-role-allow="direccion">Agregar salón</button>
+        </div>
+        <div id="listaSalones" class="chip-list"></div>
+      </article>
+    </div>
+
+    <h4 class="section-title">Configuración de períodos</h4>
+    <div class="horarios-periodos table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Inicio</th>
+            <th>Fin</th>
+          </tr>
+        </thead>
+        <tbody id="tablaPeriodosConfig"></tbody>
+      </table>
+      <div class="panel-acciones panel-inline">
+        <button id="btnGuardarPeriodos" class="btn-sec" type="button" data-role-allow="direccion">Guardar períodos</button>
+        <button id="btnResetPeriodos" class="btn-sec" type="button" data-role-allow="direccion">Restaurar sugerencia 50 min</button>
+      </div>
+    </div>
+
+    <h4 class="section-title">Matriz semanal</h4>
+    <p class="ayuda">Haz clic en una celda para editar el bloque (solo Dirección).</p>
+    <div class="table-shell horarios-map-shell">
+      <table class="horarios-mapa">
+        <thead>
+          <tr>
+            <th>Periodo</th>
+            <th>Lu</th>
+            <th>Ma</th>
+            <th>Mi</th>
+            <th>Ju</th>
+            <th>Vi</th>
+          </tr>
+        </thead>
+        <tbody id="tablaMapaHorarios"></tbody>
+      </table>
+    </div>
+
+    <div class="panel-acciones">
+      <button id="btnGuardarTodo" class="btn-registrar" type="button" data-role-allow="direccion">Guardar mapeo</button>
+      <button id="btnExportarHorarios" class="btn-sec" type="button">Exportar JSON</button>
+      <button id="btnImportarHorarios" class="btn-sec" type="button" data-role-allow="direccion">Importar JSON</button>
+      <input id="inputImportHorarios" type="file" accept=".json,application/json" style="display:none">
+    </div>
+
+    <p class="ayuda">
+      Recomendado: cargar primero grupos, docentes y salones. En vista por grupo, toca una celda para mapear materia, docente y lector.
+      En vista por docente, solo se consulta para validar el horario.
+    </p>
+  </section>
+
+  <div class="overlay" id="overlayHorario">
+    <div class="popup popup-horario">
+      <h2 id="tituloEditorHorario">Editar bloque</h2>
+      <p id="subtituloEditorHorario" class="horario-resumen"></p>
+
+      <input id="edClaseId" type="hidden">
+
+      <div class="registro-grid">
+        <label>
+          Materia
+          <input id="edMateriaHorario" placeholder="Materia">
+        </label>
+
+        <label>
+          Docente
+          <select id="edDocenteHorario"></select>
+        </label>
+
+        <label>
+          Salón
+          <select id="edSalonHorario"></select>
+        </label>
+
+        <label>
+          Lector (device_id)
+          <input id="edLectorHorario" placeholder="Lector del salón">
+        </label>
+      </div>
+
+      <div class="registro-acciones">
+        <button id="btnGuardarCeldaHorario" class="btn-registrar" type="button">Guardar bloque</button>
+        <button id="btnLimpiarCeldaHorario" class="btn-sec" type="button">Limpiar bloque</button>
+        <button id="btnCerrarCeldaHorario" class="btn-sec" type="button">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/storage.js?v=20260310a"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/realtime.js?v=20260312a"></script>
+  <script src="js/horarios.js?v=20260312a"></script>
+  <script src="js/horarios_page.js?v=20260312a"></script>
+</body>
+</html>

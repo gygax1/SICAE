@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Historial de Asistencias</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body data-requires-auth="true" data-page-role-allow="direccion">
+  <header class="header-brand">
+    <div class="brand">
+      <img src="img/logo.png" alt="Control Escolar">
+      <div>
+        <h2>Historial de asistencias</h2>
+        <p class="brand-sub">Consulta completa por alumno</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="session-pill" data-auth-user>Sin sesión</span>
+      <button class="btn-sec" onclick="location.href='index.html'">Volver</button>
+      <button class="btn-sec" data-auth-logout>Salir</button>
+    </div>
+  </header>
+
+  <section class="search-bar">
+    <input id="busqueda" placeholder="Buscar por nombre o matrícula...">
+  </section>
+
+  <div class="panel-acciones panel-inline">
+    <button onclick="descargarReporteHistorial('asistencias')">Exportar asistencias CSV</button>
+    <button onclick="descargarReporteHistorial('diario')">Exportar resumen diario CSV</button>
+  </div>
+
+  <p id="estadoHistorial" class="screen-status loading">Cargando historial...</p>
+  <div class="historial-container" id="listaHistorial"></div>
+
+  <script src="js/storage.js?v=20260310a"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/realtime.js?v=20260312a"></script>
+
+  <script>
+    const KEY_HISTORIAL = "historial_asistencias";
+
+    const listaHistorial = document.getElementById("listaHistorial");
+    const busqueda = document.getElementById("busqueda");
+    const estadoHistorial = document.getElementById("estadoHistorial");
+
+    let alumnos = [];
+    let sesiones = [];
+    let vista = [];
+
+    window.addEventListener("load", initHistorial);
+
+    function setEstado(msg, tipo = "info") {
+      estadoHistorial.textContent = msg;
+      estadoHistorial.className = `screen-status ${tipo}`;
+      estadoHistorial.style.display = msg ? "block" : "none";
+    }
+
+    async function initHistorial() {
+      setEstado("Cargando historial...", "loading");
+      busqueda.addEventListener("input", filtrar);
+
+      if (typeof ensureAlumnosCargados === "function") {
+        await ensureAlumnosCargados();
+      }
+
+      alumnos = (typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos"))
+        .filter(a => a && a.id);
+
+      const remotoOK = await cargarSesionesDesdeServidor();
+      if (!remotoOK) {
+        sesiones = safeGet(KEY_HISTORIAL);
+      }
+
+      iniciarSync();
+      prepararVista();
+    }
+
+    function iniciarSync() {
+      const bc = typeof createAppBroadcastChannel === "function"
+        ? createAppBroadcastChannel("victory-data")
+        : new BroadcastChannel("victory-data");
+
+      bc.onmessage = async e => {
+        if (e.data === "alumnos" || e.data === "asistencias") {
+          alumnos = (typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos"));
+          const remotoOK = await cargarSesionesDesdeServidor();
+          if (!remotoOK) sesiones = safeGet(KEY_HISTORIAL);
+          prepararVista();
+        }
+      };
+
+      window.addEventListener("storage", async e => {
+        const alumnosChanged = typeof isAppStorageKeyMatch === "function"
+          ? isAppStorageKeyMatch(e.key, "alumnos")
+          : (e.key === "alumnos");
+        const historialChanged = typeof isAppStorageKeyMatch === "function"
+          ? isAppStorageKeyMatch(e.key, KEY_HISTORIAL)
+          : (e.key === KEY_HISTORIAL);
+
+        if (alumnosChanged || historialChanged) {
+          alumnos = (typeof obtenerAlumnos === "function" ? obtenerAlumnos() : safeGet("alumnos"));
+          sesiones = safeGet(KEY_HISTORIAL);
+          prepararVista();
+        }
+      });
+    }
+
+    function alumnoDeEvento(ev) {
+      const id = String(ev.alumno_id || "");
+      if (id) {
+        const porId = alumnos.find(a => String(a.id) === id);
+        if (porId) return porId;
+      }
+
+      const uid = normalizarUID(ev.uid || ev.tarjetaUID || "");
+      if (uid) {
+        const porUID = alumnos.find(a => normalizarUID(a.tarjetaUID) === uid);
+        if (porUID) return porUID;
+      }
+
+      return {
+        id: id || uid || crypto.randomUUID(),
+        nombre: "Alumno",
+        matricula: "-",
+        grado: "",
+        grupo: "",
+        tarjetaUID: uid || ""
+      };
+    }
+
+    async function cargarSesionesDesdeServidor() {
+      if (!navigator.onLine || typeof obtenerEventosAttendanceRemotos !== "function") return false;
+
+      try {
+        const data = await obtenerEventosAttendanceRemotos({ asc: true });
+        if (!Array.isArray(data)) return false;
+
+        const abiertas = {};
+        const lista = [];
+
+        for (const row of data || []) {
+          const key = String(row.alumno_id || row.uid || "");
+          if (!key) continue;
+
+          const ts = new Date(row.created_at).getTime();
+          if (!ts) continue;
+
+          if (row.type === "entrada") {
+            abiertas[key] = {
+              id: row.id,
+              alumno_id: row.alumno_id || null,
+              uid: normalizarUID(row.uid),
+              fecha: fechaDesdeTS(ts),
+              entrada_ts: ts,
+              salida_ts: null
+            };
+            continue;
+          }
+
+          if (row.type === "salida" && abiertas[key]) {
+            abiertas[key].salida_ts = ts;
+            lista.push(abiertas[key]);
+            delete abiertas[key];
+          }
+        }
+
+        Object.values(abiertas).forEach(s => lista.push(s));
+
+        lista.sort((a, b) => (b.entrada_ts || 0) - (a.entrada_ts || 0));
+        sesiones = lista;
+        safeSet(KEY_HISTORIAL, lista);
+        return true;
+      } catch (err) {
+        console.error("[HISTORIAL] Error general:", err);
+        return false;
+      }
+    }
+
+    function prepararVista() {
+      const agrupado = new Map();
+
+      for (const ev of sesiones) {
+        const al = alumnoDeEvento(ev);
+        const key = String(al.id || al.tarjetaUID || "sin-id");
+
+        if (!agrupado.has(key)) {
+          agrupado.set(key, {
+            alumno: al,
+            registros: []
+          });
+        }
+
+        agrupado.get(key).registros.push(ev);
+      }
+
+      vista = Array.from(agrupado.values())
+        .map(item => ({
+          ...item,
+          ultimoTS: item.registros[0]?.entrada_ts || 0
+        }))
+        .sort((a, b) => b.ultimoTS - a.ultimoTS);
+
+      filtrar();
+    }
+
+    function filtrar() {
+      const q = String(busqueda.value || "").trim().toLowerCase();
+      if (!q) {
+        render(vista);
+        return;
+      }
+
+      render(vista.filter(v => {
+        const nombre = String(v.alumno.nombre || "").toLowerCase();
+        const matricula = String(v.alumno.matricula || "").toLowerCase();
+        return nombre.includes(q) || matricula.includes(q);
+      }));
+    }
+
+    function render(lista) {
+      listaHistorial.innerHTML = "";
+
+      if (!lista.length) {
+        listaHistorial.innerHTML = '<p class="empty">No hay historial disponible</p>';
+        setEstado("Sin registros para mostrar.", "empty");
+        return;
+      }
+
+      setEstado("", "ok");
+
+      lista.forEach(item => {
+        const alumno = item.alumno;
+        const registros = [...item.registros].sort((a, b) => (b.entrada_ts || 0) - (a.entrada_ts || 0));
+
+        const card = document.createElement("div");
+        card.className = "alumno-card";
+
+        const header = document.createElement("div");
+        header.className = "alumno-header";
+        header.setAttribute("aria-expanded", "false");
+
+        const infoWrap = document.createElement("div");
+        infoWrap.className = "info-wrapper";
+
+        const infoBloque = document.createElement("div");
+        infoBloque.className = "info-bloque";
+
+        const h3 = document.createElement("h3");
+        h3.textContent = alumno.nombre || "Alumno";
+
+        const p = document.createElement("p");
+        p.className = "meta";
+
+        const gradoGrupo = `${alumno.grado || ""}${alumno.grado && alumno.grupo ? " / " : ""}${alumno.grupo || ""}`;
+        p.textContent = `Matrícula: ${alumno.matricula || "-"} | Grado/Grupo: ${gradoGrupo || "-"}`;
+
+        infoBloque.appendChild(h3);
+        infoBloque.appendChild(p);
+        infoWrap.appendChild(infoBloque);
+
+        const flecha = document.createElement("div");
+        flecha.className = "flecha";
+        flecha.textContent = "▾";
+
+        header.appendChild(infoWrap);
+        header.appendChild(flecha);
+
+        const panel = document.createElement("div");
+        panel.className = "historial";
+
+        const table = document.createElement("table");
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Entrada</th>
+              <th>Salida</th>
+            </tr>
+          </thead>
+        `;
+
+        const tbody = document.createElement("tbody");
+
+        registros.forEach((r, i) => {
+          const tr = document.createElement("tr");
+          if (i % 2) tr.classList.add("alt");
+
+          const tdFecha = document.createElement("td");
+          tdFecha.textContent = r.fecha || "-";
+
+          const tdEntrada = document.createElement("td");
+          tdEntrada.textContent = r.entrada_ts ? (horaDesdeTS(r.entrada_ts) || "-") : "-";
+
+          const tdSalida = document.createElement("td");
+          tdSalida.textContent = r.salida_ts ? (horaDesdeTS(r.salida_ts) || "-") : "-";
+
+          tr.append(tdFecha, tdEntrada, tdSalida);
+          tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+        panel.appendChild(table);
+
+        header.addEventListener("click", () => {
+          document.querySelectorAll(".alumno-card.abierto").forEach(open => {
+            if (open !== card) {
+              open.classList.remove("abierto");
+              open.querySelector(".historial")?.classList.remove("abierto");
+              open.querySelector(".alumno-header")?.setAttribute("aria-expanded", "false");
+            }
+          });
+
+          const abierto = card.classList.toggle("abierto");
+          panel.classList.toggle("abierto");
+          header.setAttribute("aria-expanded", abierto ? "true" : "false");
+        });
+
+        card.append(header, panel);
+        listaHistorial.appendChild(card);
+      });
+    }
+
+    async function descargarReporteHistorial(tipo) {
+      try {
+        if (tipo === "asistencias" && typeof descargarReporteAsistenciasCsv === "function") {
+          await descargarReporteAsistenciasCsv();
+          return;
+        }
+
+        if (tipo === "diario" && typeof descargarReporteDiarioCsv === "function") {
+          await descargarReporteDiarioCsv();
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+        setEstado("No se pudo descargar el reporte.", "error");
+      }
+    }
+  </script>
+</body>
+</html>
+

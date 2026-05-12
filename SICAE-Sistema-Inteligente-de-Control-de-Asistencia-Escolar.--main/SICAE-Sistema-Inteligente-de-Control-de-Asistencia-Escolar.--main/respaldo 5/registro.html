@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro de Alumnos</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+
+<body data-requires-auth="true" data-page-role-allow="direccion">
+  <header class="header-brand">
+    <div class="brand">
+      <img src="img/logo.png" alt="Control Escolar">
+      <div>
+        <h2>Registro de alumnos</h2>
+        <p class="brand-sub">Alta individual y carga masiva</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span class="session-pill" data-auth-user>Sin sesión</span>
+      <button class="btn-sec" onclick="location.href='index.html'">Volver</button>
+      <button class="btn-sec" data-auth-logout>Salir</button>
+    </div>
+  </header>
+
+  <section class="registro-shell">
+    <h3>Datos del alumno</h3>
+    <p id="estadoRegistro" class="screen-status info">Completa los datos y asigna una tarjeta NFC.</p>
+
+    <div class="registro-grid">
+      <input id="nombre" placeholder="Nombre completo">
+      <input id="correo" type="email" placeholder="Correo electrónico">
+      <input id="fechaNacimiento" type="date" placeholder="Fecha de nacimiento">
+      <input id="telefono" type="tel" placeholder="Teléfono de contacto">
+      <input id="matricula" placeholder="Matrícula">
+      <input id="grado" placeholder="Grado (ej: 1, 2, 3)">
+      <input id="grupo" placeholder="Grupo (ej: A, B)">
+      <select id="tipoSangre">
+        <option value="">Tipo de sangre</option>
+        <option value="A+">A+</option>
+        <option value="A-">A-</option>
+        <option value="B+">B+</option>
+        <option value="B-">B-</option>
+        <option value="AB+">AB+</option>
+        <option value="AB-">AB-</option>
+        <option value="O+">O+</option>
+        <option value="O-">O-</option>
+      </select>
+      <input id="tutorNombre" placeholder="Nombre completo del tutor">
+      <select id="tutorParentesco">
+        <option value="">Parentesco del tutor</option>
+        <option value="MADRE">Madre</option>
+        <option value="PADRE">Padre</option>
+        <option value="TUTOR_LEGAL">Tutor legal</option>
+        <option value="ABUELA">Abuela</option>
+        <option value="ABUELO">Abuelo</option>
+        <option value="HERMANA">Hermana</option>
+        <option value="HERMANO">Hermano</option>
+        <option value="TIA">Tía</option>
+        <option value="TIO">Tío</option>
+        <option value="OTRO_FAMILIAR">Otro familiar</option>
+      </select>
+      <input id="tutorTelefono" type="tel" placeholder="Número de contacto del tutor">
+      <input id="tutorCorreo" type="email" placeholder="Correo de contacto del tutor">
+      <textarea id="alergias" rows="2" placeholder="Alergias del alumno"></textarea>
+    </div>
+
+    <div class="registro-acciones">
+      <button class="btn-nfc" id="btnAsignar" data-role-allow="direccion" onclick="abrirPopupNFC()">Asignar tarjeta NFC</button>
+      <button class="btn-registrar" id="btnRegistrar" data-role-allow="direccion" onclick="registrarAlumno()" disabled>Registrar alumno</button>
+    </div>
+
+    <p class="ayuda">Primero asigna la tarjeta NFC y después guarda el alumno.</p>
+    <p id="uidTexto" class="uid"></p>
+
+    <div class="import-wrap" id="importacionExcel">
+      <h4>Importación masiva desde Excel</h4>
+      <div class="import-actions">
+        <a class="btn-plantilla" href="plantillas/plantilla_alumnos_cecyte.xlsx" download onclick="descargarPlantilla()">
+          Descargar plantilla Excel
+        </a>
+        <button class="btn-importar" id="btnImportarExcel" data-role-allow="direccion" type="button" onclick="abrirSelectorExcel()">
+          Cargar lista de alumnos
+        </button>
+      </div>
+      <input id="inputExcel" type="file" accept=".xlsx,.xls,.csv" style="display:none">
+      <p class="import-status" id="importStatus"></p>
+      <p class="ayuda">
+        Columnas obligatorias: nombre_completo, correo_electronico, fecha_nacimiento, telefono_contacto, matricula, grado, grupo,
+        tipo_sangre, tutor_nombre_completo, tutor_parentesco, tutor_telefono_contacto, tutor_correo_contacto, alergias.
+        Columna opcional: tarjeta_uid.
+      </p>
+    </div>
+  </section>
+
+  <div class="overlay" id="overlay">
+    <div class="popup">
+      <h2>Asigne tarjeta</h2>
+      <div id="estado" class="estado amarillo">Esperando tarjeta...</div>
+    </div>
+  </div>
+
+  <div class="confirmacion" id="confirmacion">
+    <div class="box">
+      <h1 id="tituloConfirm"></h1>
+      <p id="mensajeConfirm"></p>
+    </div>
+  </div>
+
+  <script src="js/storage.js?v=20260310a"></script>
+  <script src="js/auth.js?v=20260312a"></script>
+  <script src="js/realtime.js?v=20260312a"></script>
+  <script src="js/nfc.js?v=20260310a"></script>
+
+  <script>
+    let tarjetaUID = null;
+    let leyendoNFC = false;
+    let importandoExcel = false;
+    const inputExcelEl = document.getElementById("inputExcel");
+    const importStatusEl = document.getElementById("importStatus");
+    const estadoRegistroEl = document.getElementById("estadoRegistro");
+    const BLOOD_TYPES = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+    const TUTOR_RELATIONS = [
+      "MADRE",
+      "PADRE",
+      "TUTOR_LEGAL",
+      "ABUELA",
+      "ABUELO",
+      "HERMANA",
+      "HERMANO",
+      "TIA",
+      "TIO",
+      "OTRO_FAMILIAR"
+    ];
+
+    const HEADERS_REQUERIDOS = [
+      "nombre_completo",
+      "correo_electronico",
+      "fecha_nacimiento",
+      "telefono_contacto",
+      "matricula",
+      "grado",
+      "grupo",
+      "tipo_sangre",
+      "tutor_nombre_completo",
+      "tutor_parentesco",
+      "tutor_telefono_contacto",
+      "tutor_correo_contacto",
+      "alergias"
+    ];
+
+    const HEADER_ALIASES = {
+      nombre: "nombre_completo",
+      nombre_completo: "nombre_completo",
+      correo: "correo_electronico",
+      correo_electronico: "correo_electronico",
+      email: "correo_electronico",
+      fecha_nacimiento: "fecha_nacimiento",
+      nacimiento: "fecha_nacimiento",
+      telefono: "telefono_contacto",
+      telefono_contacto: "telefono_contacto",
+      matricula: "matricula",
+      grado: "grado",
+      grupo: "grupo",
+      tipo_sangre: "tipo_sangre",
+      sangre: "tipo_sangre",
+      tutor_nombre_completo: "tutor_nombre_completo",
+      nombre_tutor: "tutor_nombre_completo",
+      tutor_parentesco: "tutor_parentesco",
+      parentesco_tutor: "tutor_parentesco",
+      tutor_telefono_contacto: "tutor_telefono_contacto",
+      telefono_tutor: "tutor_telefono_contacto",
+      tutor_correo_contacto: "tutor_correo_contacto",
+      correo_tutor: "tutor_correo_contacto",
+      alergias: "alergias",
+      tarjeta_uid: "tarjeta_uid",
+      uid: "tarjeta_uid"
+    };
+
+    window.addEventListener("load", async () => {
+      if (typeof ensureAlumnosCargados === "function") {
+        await ensureAlumnosCargados();
+      }
+
+      inputExcelEl.addEventListener("change", importarExcelAlumnos);
+      validarPermisosCaptura();
+    });
+
+    function setEstadoRegistro(msg, tipo = "info") {
+      estadoRegistroEl.textContent = msg;
+      estadoRegistroEl.className = `screen-status ${tipo}`;
+    }
+
+    function validarPermisosCaptura() {
+      const permitido = typeof isAuthRoleAllowed === "function"
+        ? isAuthRoleAllowed(["direccion"])
+        : true;
+
+      if (!permitido) {
+        setEstadoRegistro("Tu rol actual es solo consulta. No puedes registrar ni importar alumnos.", "warn");
+        return;
+      }
+
+      setEstadoRegistro("Listo para capturar. Asigna tarjeta NFC para habilitar el guardado.", "ok");
+    }
+
+    function mostrarConfirm(titulo, mensaje, tipo = "error") {
+      confirmacion.style.display = "flex";
+      confirmacion.className = `confirmacion ${tipo}`;
+      tituloConfirm.textContent = titulo;
+      mensajeConfirm.textContent = mensaje;
+
+      setTimeout(() => {
+        confirmacion.style.display = "none";
+      }, 2200);
+    }
+
+    function validarCorreo(correo) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo);
+    }
+
+    function normalizarTipoSangre(valor) {
+      const v = String(valor || "").trim().toUpperCase();
+      return BLOOD_TYPES.includes(v) ? v : "";
+    }
+
+    function normalizarParentescoTutor(valor) {
+      const v = String(valor || "").trim().toUpperCase().replace(/\s+/g, "_");
+      return TUTOR_RELATIONS.includes(v) ? v : "";
+    }
+
+    function normalizarMatricula(valor) {
+      return String(valor || "").trim().toUpperCase();
+    }
+
+    function normalizarHeader(valor) {
+      return String(valor || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    }
+
+    function setImportStatus(msg, tipo = "info") {
+      importStatusEl.textContent = msg || "";
+      importStatusEl.className = `import-status ${tipo}`;
+    }
+
+    function abrirSelectorExcel() {
+      if (importandoExcel) return;
+      inputExcelEl.value = "";
+      inputExcelEl.click();
+    }
+
+    function descargarPlantilla() {
+      setImportStatus("Plantilla descargada. Llénala y luego sube el archivo en 'Cargar lista de alumnos'.", "ok");
+    }
+
+    function excelDateToISO(value) {
+      if (value === null || value === undefined || value === "") return "";
+
+      if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, "0");
+        const d = String(value.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+
+      if (typeof value === "number") {
+        const parsed = XLSX.SSF.parse_date_code(value);
+        if (parsed?.y && parsed?.m && parsed?.d) {
+          const y = parsed.y;
+          const m = String(parsed.m).padStart(2, "0");
+          const d = String(parsed.d).padStart(2, "0");
+          return `${y}-${m}-${d}`;
+        }
+      }
+
+      const txt = String(value).trim();
+      if (!txt) return "";
+
+      const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(txt);
+      if (iso) return txt;
+
+      const lat = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(txt);
+      if (lat) {
+        const d = lat[1];
+        const m = lat[2];
+        const y = lat[3];
+        return `${y}-${m}-${d}`;
+      }
+
+      const parsedDate = new Date(txt);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        const y = parsedDate.getFullYear();
+        const m = String(parsedDate.getMonth() + 1).padStart(2, "0");
+        const d = String(parsedDate.getDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+
+      return "";
+    }
+
+    function construirIndiceLocalAlumnos(alumnos) {
+      const byMatricula = new Map();
+      const byCorreo = new Map();
+      const byUID = new Map();
+
+      alumnos.forEach(a => {
+        const m = normalizarMatricula(a.matricula);
+        const c = String(a.correo || "").trim().toLowerCase();
+        const u = normalizarUID(a.tarjetaUID || "");
+
+        if (m) byMatricula.set(m, a);
+        if (c) byCorreo.set(c, a);
+        if (u) byUID.set(u, a);
+      });
+
+      return { byMatricula, byCorreo, byUID };
+    }
+
+    function prepararAlumnoDesdeFila(fila) {
+      const correo = String(fila.correo_electronico || "").trim().toLowerCase();
+      const fechaNacimiento = excelDateToISO(fila.fecha_nacimiento);
+      const uid = normalizarUID(fila.tarjeta_uid || "");
+
+      return {
+        nombre: String(fila.nombre_completo || "").trim(),
+        correo,
+        fechaNacimiento,
+        telefono: String(fila.telefono_contacto || "").trim(),
+        matricula: normalizarMatricula(fila.matricula),
+        grado: String(fila.grado || "").trim().toUpperCase(),
+        grupo: String(fila.grupo || "").trim().toUpperCase(),
+        tipoSangre: normalizarTipoSangre(fila.tipo_sangre),
+        alergias: String(fila.alergias || "").trim(),
+        tutorNombre: String(fila.tutor_nombre_completo || "").trim(),
+        tutorParentesco: normalizarParentescoTutor(fila.tutor_parentesco),
+        tutorTelefono: String(fila.tutor_telefono_contacto || "").trim(),
+        tutorCorreo: String(fila.tutor_correo_contacto || "").trim().toLowerCase(),
+        tarjetaUID: uid
+      };
+    }
+
+    function validarAlumnoImportado(alumno) {
+      if (!alumno.nombre || !alumno.correo || !alumno.fechaNacimiento || !alumno.telefono || !alumno.matricula || !alumno.grado || !alumno.grupo) {
+        return "Campos obligatorios incompletos";
+      }
+      if (!validarCorreo(alumno.correo)) {
+        return "Correo inválido";
+      }
+      if (!alumno.tipoSangre) {
+        return "Tipo de sangre inválido";
+      }
+      if (!alumno.tutorNombre || !alumno.tutorParentesco || !alumno.tutorTelefono || !alumno.tutorCorreo) {
+        return "Datos del tutor incompletos";
+      }
+      if (!validarCorreo(alumno.tutorCorreo)) {
+        return "Correo del tutor inválido";
+      }
+      return null;
+    }
+
+    function mapearFilasExcel(rows) {
+      if (!rows.length) return { filas: [], error: "El archivo no contiene filas" };
+
+      const headersOriginal = (rows[0] || []).map(h => String(h || "").trim());
+      const headersCanon = headersOriginal.map(h => {
+        const key = normalizarHeader(h);
+        return HEADER_ALIASES[key] || key;
+      });
+
+      const faltantes = HEADERS_REQUERIDOS.filter(h => !headersCanon.includes(h));
+      if (faltantes.length) {
+        return { filas: [], error: `Faltan columnas obligatorias: ${faltantes.join(", ")}` };
+      }
+
+      const filas = [];
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.every(v => String(v ?? "").trim() === "")) continue;
+
+        const obj = {};
+        headersCanon.forEach((h, idx) => {
+          obj[h] = row[idx];
+        });
+        obj.__rownum = i + 1;
+        filas.push(obj);
+      }
+
+      return { filas, error: null };
+    }
+
+    async function ejecutarEnLotes(items, size, worker) {
+      for (let i = 0; i < items.length; i += size) {
+        const chunk = items.slice(i, i + size);
+        await Promise.all(chunk.map(worker));
+      }
+    }
+
+    async function sincronizarRemotoImportacion(creados, actualizados) {
+      const resumen = {
+        fallasInsert: [],
+        fallasUpdate: []
+      };
+
+      if (!navigator.onLine) return resumen;
+
+      await ejecutarEnLotes(creados, 20, async alumno => {
+        if (typeof insertarAlumnoSupabase !== "function") return;
+
+        const r = await insertarAlumnoSupabase(alumno);
+        if (!r?.ok) {
+          const clave = alumno?.matricula || alumno?.nombre || alumno?.id || "sin-clave";
+          resumen.fallasInsert.push(`${clave}: ${r?.message || "Error remoto"}`);
+        }
+      });
+
+      await ejecutarEnLotes(actualizados, 20, async alumno => {
+        if (typeof actualizarAlumnoSupabase !== "function") return;
+
+        const ok = await actualizarAlumnoSupabase(alumno);
+        if (!ok) {
+          const clave = alumno?.matricula || alumno?.nombre || alumno?.id || "sin-clave";
+          resumen.fallasUpdate.push(`${clave}: No se pudo actualizar en remoto`);
+        }
+      });
+
+      return resumen;
+    }
+
+    async function importarExcelAlumnos(event) {
+      const permitido = typeof isAuthRoleAllowed === "function"
+        ? isAuthRoleAllowed(["direccion"])
+        : true;
+
+      if (!permitido) {
+        setImportStatus("Sin permisos para importar.", "error");
+        return;
+      }
+
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      if (importandoExcel) return;
+      importandoExcel = true;
+      setImportStatus("Procesando archivo...", "info");
+
+      try {
+        const data = await file.arrayBuffer();
+        const wb = XLSX.read(data, { type: "array", cellDates: true });
+        const nombreHoja = wb.SheetNames[0];
+        const ws = wb.Sheets[nombreHoja];
+
+        if (!ws) {
+          setImportStatus("No se encontró una hoja válida en el archivo.", "error");
+          return;
+        }
+
+        const rows = XLSX.utils.sheet_to_json(ws, {
+          header: 1,
+          raw: true,
+          defval: ""
+        });
+
+        const mapped = mapearFilasExcel(rows);
+        if (mapped.error) {
+          setImportStatus(mapped.error, "error");
+          return;
+        }
+
+        const base = obtenerAlumnosLocal();
+        const { byMatricula, byCorreo, byUID } = construirIndiceLocalAlumnos(base);
+
+        const vistosMatricula = new Set();
+        const nuevos = [];
+        const actualizados = [];
+        const errores = [];
+
+        for (const fila of mapped.filas) {
+          const alumno = prepararAlumnoDesdeFila(fila);
+          const error = validarAlumnoImportado(alumno);
+
+          if (error) {
+            errores.push(`Fila ${fila.__rownum}: ${error}`);
+            continue;
+          }
+
+          if (vistosMatricula.has(alumno.matricula)) {
+            errores.push(`Fila ${fila.__rownum}: matrícula duplicada en el archivo (${alumno.matricula})`);
+            continue;
+          }
+          vistosMatricula.add(alumno.matricula);
+
+          const existente =
+            byMatricula.get(alumno.matricula) ||
+            byCorreo.get(alumno.correo) ||
+            (alumno.tarjetaUID ? byUID.get(alumno.tarjetaUID) : null);
+
+          let objetoFinal = null;
+
+          if (existente) {
+            const merged = {
+              ...existente,
+              ...alumno,
+              id: existente.id,
+              tarjetaUID: alumno.tarjetaUID || existente.tarjetaUID || "",
+              fechaRegistro: existente.fechaRegistro || hoy()
+            };
+
+            const idx = base.findIndex(a => String(a.id) === String(existente.id));
+            if (idx >= 0) base[idx] = merged;
+            objetoFinal = merged;
+            actualizados.push(merged);
+          } else {
+            const nuevo = {
+              id: crypto.randomUUID(),
+              ...alumno,
+              fechaRegistro: hoy()
+            };
+            base.push(nuevo);
+            objetoFinal = nuevo;
+            nuevos.push(nuevo);
+          }
+
+          byMatricula.set(alumno.matricula, objetoFinal);
+          byCorreo.set(alumno.correo, objetoFinal);
+          if (alumno.tarjetaUID) byUID.set(alumno.tarjetaUID, objetoFinal);
+        }
+
+        if (typeof guardarAlumnos === "function") {
+          guardarAlumnos(base);
+        } else {
+          safeSet("alumnos", base);
+        }
+
+        const bcImport = typeof createAppBroadcastChannel === "function"
+          ? createAppBroadcastChannel("victory-data")
+          : new BroadcastChannel("victory-data");
+        bcImport.postMessage("alumnos");
+        const sync = await sincronizarRemotoImportacion(nuevos, actualizados);
+        const fallasRemotas = (sync?.fallasInsert?.length || 0) + (sync?.fallasUpdate?.length || 0);
+        if (fallasRemotas > 0) {
+          errores.push(`Sincronización remota incompleta: ${fallasRemotas} fila(s)`);
+          console.warn("[IMPORTACION] Fallas remotas:", sync);
+        }
+
+        const resumen = `Importación completada. Nuevos: ${nuevos.length}, actualizados: ${actualizados.length}, errores: ${errores.length}`;
+        setImportStatus(resumen, errores.length ? "warn" : "ok");
+
+        if (!errores.length) {
+          mostrarConfirm("Importación completada", `Se cargaron ${nuevos.length + actualizados.length} alumnos`, "entrada");
+        } else {
+          console.warn("[IMPORTACION] Errores detectados:", errores);
+        }
+      } catch (err) {
+        console.error("[IMPORTACION] Error procesando Excel:", err);
+        setImportStatus("No se pudo procesar el archivo. Verifica el formato.", "error");
+      } finally {
+        importandoExcel = false;
+      }
+    }
+
+    function obtenerAlumnosLocal() {
+      if (typeof obtenerAlumnos === "function") return obtenerAlumnos();
+      return safeGet("alumnos");
+    }
+
+    async function duplicadoAlumno({ correo, matricula, uid }) {
+      const alumnos = obtenerAlumnosLocal();
+
+      if (alumnos.some(a => String(a.correo || "").trim().toLowerCase() === correo.trim().toLowerCase())) {
+        return "correo";
+      }
+
+      if (alumnos.some(a => normalizarMatricula(a.matricula) === matricula)) {
+        return "matricula";
+      }
+
+      if (alumnos.some(a => normalizarUID(a.tarjetaUID) === uid)) {
+        return "tarjeta";
+      }
+
+      if (typeof verificarDuplicadoAlumnoRemoto === "function") {
+        return await verificarDuplicadoAlumnoRemoto({ correo, matricula, uid });
+      }
+
+      return null;
+    }
+
+    function abrirPopupNFC() {
+      if (leyendoNFC) return;
+
+      const permitido = typeof isAuthRoleAllowed === "function"
+        ? isAuthRoleAllowed(["direccion"])
+        : true;
+
+      if (!permitido) {
+        mostrarConfirm("Sin permiso", "Tu rol actual no permite asignar tarjetas", "error");
+        return;
+      }
+
+      leyendoNFC = true;
+      tarjetaUID = null;
+      btnRegistrar.disabled = true;
+      uidTexto.textContent = "";
+
+      overlay.style.display = "flex";
+      estado.className = "estado amarillo";
+      estado.textContent = "Esperando tarjeta...";
+
+      iniciarNFCControlado({
+        onUID: async uid => {
+          uid = normalizarUID(uid);
+
+          const yaUsada = await duplicadoAlumno({
+            correo: "temp@tmp.local",
+            matricula: "TMP_NO_VALIDA",
+            uid
+          });
+
+          if (yaUsada === "tarjeta") {
+            estado.className = "estado rojo";
+            estado.textContent = "Tarjeta ya registrada";
+            setTimeout(cerrarPopupNFC, 1400);
+            return;
+          }
+
+          tarjetaUID = uid;
+          uidTexto.textContent = `UID asignado: ${uid}`;
+
+          estado.className = "estado verde";
+          estado.textContent = "Tarjeta asignada";
+
+          setTimeout(() => {
+            cerrarPopupNFC();
+            btnRegistrar.disabled = false;
+          }, 900);
+        }
+      });
+    }
+
+    function cerrarPopupNFC() {
+      overlay.style.display = "none";
+      leyendoNFC = false;
+      if (typeof detenerNFC === "function") {
+        detenerNFC();
+      }
+    }
+
+    function construirAlumno() {
+      return {
+        id: crypto.randomUUID(),
+        nombre: nombre.value.trim(),
+        correo: correo.value.trim().toLowerCase(),
+        fechaNacimiento: fechaNacimiento.value,
+        telefono: telefono.value.trim(),
+        matricula: normalizarMatricula(matricula.value),
+        grado: grado.value.trim().toUpperCase(),
+        grupo: grupo.value.trim().toUpperCase(),
+        tipoSangre: normalizarTipoSangre(tipoSangre.value),
+        alergias: alergias.value.trim(),
+        tutorNombre: tutorNombre.value.trim(),
+        tutorParentesco: normalizarParentescoTutor(tutorParentesco.value),
+        tutorTelefono: tutorTelefono.value.trim(),
+        tutorCorreo: tutorCorreo.value.trim().toLowerCase(),
+        tarjetaUID: normalizarUID(tarjetaUID),
+        fechaRegistro: hoy()
+      };
+    }
+
+    function validarAlumno(alumno) {
+      if (!alumno.nombre || !alumno.correo || !alumno.fechaNacimiento || !alumno.telefono || !alumno.matricula || !alumno.grado || !alumno.grupo) {
+        return "Completa todos los campos";
+      }
+
+      if (!validarCorreo(alumno.correo)) {
+        return "Correo electrónico inválido";
+      }
+
+      if (!alumno.tarjetaUID) {
+        return "Asigna una tarjeta NFC";
+      }
+
+      if (!alumno.tipoSangre) {
+        return "Selecciona un tipo de sangre válido";
+      }
+
+      if (!alumno.tutorNombre || !alumno.tutorParentesco || !alumno.tutorTelefono || !alumno.tutorCorreo) {
+        return "Completa todos los datos del tutor";
+      }
+
+      if (!validarCorreo(alumno.tutorCorreo)) {
+        return "Correo de contacto del tutor inválido";
+      }
+
+      return null;
+    }
+
+    async function registrarAlumno() {
+      const permitido = typeof isAuthRoleAllowed === "function"
+        ? isAuthRoleAllowed(["direccion"])
+        : true;
+
+      if (!permitido) {
+        mostrarConfirm("Sin permiso", "Tu rol actual no permite registrar alumnos", "error");
+        return;
+      }
+
+      const alumno = construirAlumno();
+      const errorValidacion = validarAlumno(alumno);
+
+      if (errorValidacion) {
+        mostrarConfirm("Datos incompletos", errorValidacion, "error");
+        return;
+      }
+
+      const duplicado = await duplicadoAlumno({
+        correo: alumno.correo,
+        matricula: alumno.matricula,
+        uid: alumno.tarjetaUID
+      });
+
+      if (duplicado === "correo") {
+        mostrarConfirm("Registro bloqueado", "Ese correo ya existe", "error");
+        return;
+      }
+
+      if (duplicado === "matricula") {
+        mostrarConfirm("Registro bloqueado", "Esa matrícula ya existe", "error");
+        return;
+      }
+
+      if (duplicado === "tarjeta") {
+        mostrarConfirm("Registro bloqueado", "Esa tarjeta ya existe", "error");
+        return;
+      }
+
+      if (!navigator.onLine) {
+        setEstadoRegistro("Sin internet. Conéctate para registrar en la base de datos.", "error");
+        mostrarConfirm("Sin conexión", "Conéctate a internet para guardar en la base de datos.", "error");
+        return;
+      }
+
+      setEstadoRegistro("Registrando alumno en base de datos...", "loading");
+      btnRegistrar.disabled = true;
+
+      const lista = obtenerAlumnosLocal();
+      const respaldoLista = [...lista];
+      lista.push(alumno);
+
+      if (typeof guardarAlumnos === "function") {
+        guardarAlumnos(lista);
+      } else {
+        safeSet("alumnos", lista);
+      }
+
+      const bcRegistro = typeof createAppBroadcastChannel === "function"
+        ? createAppBroadcastChannel("victory-data")
+        : new BroadcastChannel("victory-data");
+      bcRegistro.postMessage("alumnos");
+
+      if (typeof insertarAlumnoSupabase !== "function") {
+        if (typeof guardarAlumnos === "function") {
+          guardarAlumnos(respaldoLista);
+        } else {
+          safeSet("alumnos", respaldoLista);
+        }
+        bcRegistro.postMessage("alumnos");
+        btnRegistrar.disabled = false;
+        setEstadoRegistro("No hay conexión con el módulo de sincronización remota.", "error");
+        mostrarConfirm("Registro fallido", "No se pudo conectar con el módulo remoto", "error");
+        return;
+      }
+
+      const resultado = await insertarAlumnoSupabase(alumno);
+      if (!resultado?.ok) {
+        if (typeof guardarAlumnos === "function") {
+          guardarAlumnos(respaldoLista);
+        } else {
+          safeSet("alumnos", respaldoLista);
+        }
+        bcRegistro.postMessage("alumnos");
+        btnRegistrar.disabled = false;
+        setEstadoRegistro(`Error de base de datos: ${resultado?.message || "No se pudo registrar"}`, "error");
+        mostrarConfirm("Registro fallido", resultado?.message || "No se pudo guardar en la base de datos", "error");
+        return;
+      }
+
+      setEstadoRegistro("Registro confirmado en base de datos.", "ok");
+      mostrarConfirm("Registro completado", "Alumno registrado correctamente", "entrada");
+
+      setTimeout(() => {
+        location.href = "index.html";
+      }, 1500);
+    }
+  </script>
+</body>
+</html>
+
